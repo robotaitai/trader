@@ -1,0 +1,47 @@
+---
+description: bedrock -- project memory contract, always active
+alwaysApply: true
+---
+
+This project uses **bedrock** for persistent memory.
+Bedrock uses a small project cockpit in `./bedrock/`:
+
+- `Memory/` = what the project knows
+- `Work/` = what matters now
+- `Views/` = generated human inspection views
+
+## On session start
+
+1. Read `./bedrock/STATUS.md`
+2. If `onboarding: pending` — read `AGENTS.md` and perform First-Time Onboarding
+3. If `onboarding: complete` — read `./bedrock/Memory/PROJECT.md`
+4. Read `./bedrock/Work/NOW.md`
+5. Load only the Memory branches relevant to the current task
+
+## Project cockpit
+
+| Layer | Canonical? | Use for |
+|-------|-----------|---------|
+| `Memory/` | Yes | Stable project truth — write here |
+| `Work/` | Yes | Current focus, open loops, recommended next context |
+| `Views/` | No | Generated site/graph views for humans |
+| `History/` | Yes (legacy diary) | What happened over time |
+| `Evidence/` | No | Raw imports — never promote to Memory |
+| `Outputs/` | No | Legacy generated outputs — compatibility only |
+| `Sessions/` | No | Temporary state — prune aggressively |
+
+## After meaningful work
+
+- Write confirmed facts to `./bedrock/Memory/`
+- Update current priorities, risks, or open loops in `./bedrock/Work/`
+- Run `/memory-update` — update the project cockpit and summarize what changed
+
+## Periodic (every few sessions)
+
+- Run `/system-update` to refresh integration files to the latest framework version
+
+## When the context window is getting long
+
+- Run `/compact-context` — saves memory, then resets the context window
+
+Keep ontology small and project-native. Do not force generic templates.

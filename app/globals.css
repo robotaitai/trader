@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 98%;
+  --foreground: 222 16% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 16% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 16% 10%;
+  --primary: 222 17% 8%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 220 12% 94%;
+  --secondary-foreground: 222 16% 10%;
+  --muted: 220 10% 94%;
+  --muted-foreground: 220 8% 42%;
+  --accent: 220 12% 92%;
+  --accent-foreground: 222 16% 10%;
+  --destructive: 0 72% 47%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 13% 88%;
+  --input: 220 13% 88%;
+  --ring: 222 16% 20%;
+  --radius: 0.5rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background:
+    radial-gradient(circle at top right, rgba(17, 24, 39, 0.07), transparent 28rem),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+::selection {
+  background: #111827;
+  color: #ffffff;
+}
+
+.recharts-wrapper text {
+  font-family: inherit;
+}
