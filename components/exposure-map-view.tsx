@@ -6,6 +6,7 @@ import {
   CartesianGrid,
   Cell,
   ResponsiveContainer,
+  Treemap,
   Tooltip,
   XAxis,
   YAxis,
@@ -35,10 +36,91 @@ import {
   pnlClass,
 } from "@/lib/utils";
 
+const sectorColors = [
+  "#111827",
+  "#374151",
+  "#4b5563",
+  "#6b7280",
+  "#047857",
+  "#b91c1c",
+  "#9ca3af",
+  "#d1d5db",
+];
+
+type SectorTreemapNode = {
+  name: string;
+  value: number;
+  costBasis: number;
+  weightPct: number;
+  unrealizedPnl: number;
+};
+
+type SectorTreemapContentProps = Partial<SectorTreemapNode> & {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  index?: number;
+  depth?: number;
+};
+
 function pnlDotClass(value: number) {
   if (value > 0) return "border-l-emerald-600";
   if (value < 0) return "border-l-red-600";
   return "border-l-gray-300";
+}
+
+function SectorTreemapTile(props: SectorTreemapContentProps) {
+  const {
+    x = 0,
+    y = 0,
+    width = 0,
+    height = 0,
+    index = 0,
+    depth = 0,
+    name = "",
+    costBasis = 0,
+    weightPct = 0,
+  } = props;
+
+  if (depth !== 1) return null;
+
+  const showFullLabel = width > 120 && height > 58;
+  const showCompactLabel = width > 74 && height > 38;
+  const fill = sectorColors[index % sectorColors.length];
+
+  return (
+    <g>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill={fill}
+        stroke="#ffffff"
+        strokeWidth={3}
+      />
+      {showFullLabel || showCompactLabel ? (
+        <foreignObject x={x + 8} y={y + 8} width={Math.max(width - 16, 0)} height={Math.max(height - 16, 0)}>
+          <div className="flex h-full flex-col justify-between overflow-hidden text-white">
+            <div>
+              <div className="truncate text-sm font-semibold leading-tight">
+                {name}
+              </div>
+              <div className="mt-1 text-xs tabular-nums opacity-90">
+                {weightPct.toFixed(1)}%
+              </div>
+            </div>
+            {showFullLabel ? (
+              <div className="truncate text-[11px] tabular-nums opacity-85">
+                Invested {formatCurrency(costBasis)}
+              </div>
+            ) : null}
+          </div>
+        </foreignObject>
+      ) : null}
+    </g>
+  );
 }
 
 export function ExposureMapView() {
@@ -61,6 +143,17 @@ export function ExposureMapView() {
     positions: tiles
       .filter((tile) => tile.sector === sector.sector)
       .sort((a, b) => b.weightPct - a.weightPct),
+  }));
+  const totalActiveInvestment = sectorExposure.reduce(
+    (sum, sector) => sum + sector.costBasis,
+    0,
+  );
+  const sectorTreemapData: SectorTreemapNode[] = sectorExposure.map((sector) => ({
+    name: sector.sector,
+    value: sector.value,
+    costBasis: sector.costBasis,
+    weightPct: sector.weightPct,
+    unrealizedPnl: sector.unrealizedPnl,
   }));
 
   return (
@@ -127,6 +220,113 @@ export function ExposureMapView() {
             <div className="mt-1 text-xs text-muted-foreground">
               Active sector buckets
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.4fr_0.9fr]">
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <CardTitle>Sector Allocation Treemap</CardTitle>
+              <div className="text-xs text-muted-foreground">
+                Rectangle area = active market value
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border bg-gray-50 p-3">
+                <div className="text-xs text-muted-foreground">Active Value</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums">
+                  {formatCurrency(summary.portfolioValue)}
+                </div>
+              </div>
+              <div className="rounded-md border bg-gray-50 p-3">
+                <div className="text-xs text-muted-foreground">Total Investment</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums">
+                  {formatCurrency(totalActiveInvestment)}
+                </div>
+              </div>
+              <div className="rounded-md border bg-gray-50 p-3">
+                <div className="text-xs text-muted-foreground">Active Sectors</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums">
+                  {sectorExposure.length}
+                </div>
+              </div>
+            </div>
+
+            {sectorTreemapData.length ? (
+              <div className="h-[430px] overflow-hidden rounded-lg border bg-white">
+                <ResponsiveContainer width="100%" height="100%">
+                  <Treemap
+                    data={sectorTreemapData}
+                    dataKey="value"
+                    nameKey="name"
+                    aspectRatio={4 / 3}
+                    stroke="#ffffff"
+                    isAnimationActive={false}
+                    content={<SectorTreemapTile />}
+                  >
+                    <Tooltip
+                      formatter={(value, name, item) => {
+                        const payload = item.payload as SectorTreemapNode;
+                        if (name === "value") {
+                          return [
+                            `${formatCurrency(Number(value))} value · ${payload.weightPct.toFixed(2)}% weight`,
+                            payload.name,
+                          ];
+                        }
+                        return [String(value), String(name)];
+                      }}
+                      contentStyle={{ borderRadius: 8, borderColor: "#e5e7eb" }}
+                    />
+                  </Treemap>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="rounded-md border bg-gray-50 p-6 text-sm text-muted-foreground">
+                Import active holdings to show sector rectangles.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Sector Investment Detail</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Sector</TableHead>
+                  <TableHead className="text-right">Weight</TableHead>
+                  <TableHead className="text-right">Value</TableHead>
+                  <TableHead className="text-right">Investment</TableHead>
+                  <TableHead className="text-right">P&L</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sectorExposure.map((sector) => (
+                  <TableRow key={sector.sector}>
+                    <TableCell className="font-medium">{sector.sector}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {sector.weightPct.toFixed(2)}%
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrencyPrecise(sector.value)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrencyPrecise(sector.costBasis)}
+                    </TableCell>
+                    <TableCell className={`text-right tabular-nums ${pnlClass(sector.unrealizedPnl)}`}>
+                      {formatCurrencyPrecise(sector.unrealizedPnl)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       </div>

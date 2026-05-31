@@ -1,7 +1,7 @@
 ---
 area: history
 project: trader2
-updated: 2026-05-30
+updated: 2026-05-31
 ---
 
 # Project History
@@ -13,10 +13,12 @@ This is not a git replacement.
 
 ## Timeline Notes
 
+- [2026-05-31-backfill](timeline/2026-05-31-backfill.md)
 - [2026-05-30-backfill](timeline/2026-05-30-backfill.md)
 
 ## Recent Activity
 
+- **2026-05-31** `project_start` — Project started (first commit: 2026-05-31, 2 total commits)
 - **2026-05-30** `backfill` — History backfill: 0 commits, 0 releases, 2 integrations
 - **2026-05-30** `integration_claude` — claude integration detected
 - **2026-05-30** `integration_cursor` — cursor integration detected

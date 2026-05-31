@@ -125,3 +125,15 @@ export type PriceHistoryPoint = {
   date: string;
   close: number;
 };
+
+export type DecisionJournalEntry = {
+  id: string;
+  date: string;
+  ticker: string;
+  decision: "BUY" | "SELL" | "HOLD" | "TRIM" | "ADD" | "WATCH";
+  thesis: string;
+  risk: string;
+  confidence: number;
+  status: "Open" | "Reviewed";
+  reviewNote?: string;
+};

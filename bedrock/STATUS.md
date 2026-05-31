@@ -11,7 +11,7 @@ last_backfill_import:
 2026-05-31
 last_compaction: 
 last_validation: 2026-05-31
-last_validation_result: lint-and-build-passed
+last_validation_result: local-ci-lint-and-build-passed
 last_doctor: 
 last_doctor_result: unknown
 ---
@@ -30,7 +30,7 @@ last_doctor_result: unknown
 
 - Last bootstrap: `2026-05-30T21:47:56Z`
 - Last backfill/import: `not-yet`
-- Last project sync: `2026-05-30T22:25:47Z`
+- Last project sync: `2026-05-31T10:00:56Z`
 - Last compaction: `not-yet`
 - Last validation: `2026-05-31` (`lint-and-build-passed`)
 - Last doctor: `not-yet` (`unknown`)

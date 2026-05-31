@@ -56,6 +56,21 @@ const marketValue = (positions: PositionState, prices: PriceState) =>
     0,
   );
 
+const marketValueWithCoverage = (positions: PositionState, prices: PriceState) => {
+  const missingTickers: string[] = [];
+  const value = Object.entries(positions).reduce((sum, [ticker, quantity]) => {
+    const price = prices[ticker];
+    if (quantity > 0 && price === undefined) {
+      missingTickers.push(ticker);
+      return sum;
+    }
+
+    return sum + quantity * (price ?? 0);
+  }, 0);
+
+  return { value, missingTickers };
+};
+
 const transactionAmount = (transaction: Transaction) => {
   const quantity = transaction.quantity || 1;
   return Math.abs(quantity * transaction.price);
@@ -273,13 +288,23 @@ export function buildExposureTiles(holdings: Holding[]): ExposureTile[] {
 export function getExposureRole(
   exposure: Pick<ExposureTile, "sector" | "weightPct" | "unrealizedPnlPct">,
 ) {
+  if (exposure.sector === "Bitcoin") return "Bitcoin sleeve";
   if (exposure.sector === "Broad Market") {
     return exposure.weightPct >= 10 ? "Core index anchor" : "Market beta anchor";
   }
+  if (exposure.sector === "Options Income") return "Income strategy sleeve";
+  if (exposure.sector === "Space & Defense Fund") return "Thematic ETF sleeve";
   if (exposure.sector === "Growth Index") {
     return exposure.weightPct >= 10 ? "Growth index anchor" : "Growth beta sleeve";
   }
   if (exposure.sector === "Diversified Fund") return "Diversifier";
+  if (exposure.sector === "Semiconductors" && exposure.weightPct >= 20) {
+    return "Chip-cycle concentration";
+  }
+  if (exposure.sector === "Nuclear Energy" || exposure.sector === "Clean Energy Equipment") {
+    return "Energy transition satellite";
+  }
+  if (exposure.sector === "Aerospace & Defense") return "Defense/aerospace satellite";
   if (exposure.weightPct >= 15) return "Core concentration";
   if (exposure.unrealizedPnlPct <= -15) return "Thesis review";
   if (exposure.unrealizedPnlPct >= 75) return "Re-underwrite winner";
@@ -469,14 +494,24 @@ function calculateMonthlyPerformanceFromPriceHistory(
       lastTradingDate,
       true,
     );
-    const startingValue = marketValue(
+    const startingValueResult = marketValueWithCoverage(
       startPositions,
       priceByDate.get(firstTradingDate) ?? {},
     );
-    const endingValue = marketValue(
+    const endingValueResult = marketValueWithCoverage(
       endPositions,
       priceByDate.get(lastTradingDate) ?? {},
     );
+
+    if (
+      startingValueResult.missingTickers.length > 0 ||
+      endingValueResult.missingTickers.length > 0
+    ) {
+      continue;
+    }
+
+    const startingValue = startingValueResult.value;
+    const endingValue = endingValueResult.value;
     const netFlow = datedTransactions
       .filter((transaction) => monthKey(transaction.parsedDate) === key)
       .reduce((sum, transaction) => {
@@ -565,7 +600,7 @@ function snapshotRowsToTransactions(
       });
     }
 
-    if (row.status === "Closed" && row.soldDate && row.soldPrice) {
+    if (row.purchaseDate && row.status === "Closed" && row.soldDate && row.soldPrice) {
       rows.push({
         id: `snapshot-sell-${row.id}-${index}`,
         date: row.soldDate,

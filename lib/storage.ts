@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   calculateHoldingsFromSnapshot,
   calculateClosedPositionsFromSnapshot,
@@ -64,22 +64,22 @@ export function usePortfolioData() {
     setLoaded(true);
   }, []);
 
-  const setTransactions = (nextTransactions: Transaction[]) => {
+  const setTransactions = useCallback((nextTransactions: Transaction[]) => {
     setTransactionsState(nextTransactions);
     writeJson(TRANSACTIONS_KEY, nextTransactions);
-  };
+  }, []);
 
-  const setPortfolioSnapshot = (nextSnapshot: PortfolioSnapshotRow[]) => {
+  const setPortfolioSnapshot = useCallback((nextSnapshot: PortfolioSnapshotRow[]) => {
     setPortfolioSnapshotState(nextSnapshot);
     writeJson(SNAPSHOT_KEY, nextSnapshot);
-  };
+  }, []);
 
-  const setPriceHistory = (nextPriceHistory: PriceHistoryPoint[]) => {
+  const setPriceHistory = useCallback((nextPriceHistory: PriceHistoryPoint[]) => {
     setPriceHistoryState(nextPriceHistory);
     writeJson(PRICE_HISTORY_KEY, nextPriceHistory);
-  };
+  }, []);
 
-  const loadDemoData = () => {
+  const loadDemoData = useCallback(() => {
     setTransactionsState(mockTransactions);
     setSecurityMetadata(mockSecurityMetadata);
     setCurrentPrices(mockCurrentPrices);
@@ -90,16 +90,16 @@ export function usePortfolioData() {
     writeJson(PRICES_KEY, mockCurrentPrices);
     writeJson(SNAPSHOT_KEY, []);
     writeJson(PRICE_HISTORY_KEY, []);
-  };
+  }, []);
 
-  const clearLocalData = () => {
+  const clearLocalData = useCallback(() => {
     setTransactionsState([]);
     setPortfolioSnapshotState([]);
     setPriceHistoryState([]);
     writeJson(TRANSACTIONS_KEY, []);
     writeJson(SNAPSHOT_KEY, []);
     writeJson(PRICE_HISTORY_KEY, []);
-  };
+  }, []);
 
   const holdings = useMemo(
     () =>

@@ -48,14 +48,15 @@ force-add ignored private files.
 
 ### 2026-05-31, Use deterministic local notes before real agents
 
-**Decision:** Performance Lab and Exposure Map use rule-based local insights in
-places where future agentic behavior may live.
+**Decision:** Performance Lab, Exposure Map, and Investor Mirror use rule-based
+local insights in places where future agentic behavior may live.
 
 **Why:** The user asked to "be the agent for now" while the project remains
 local-first with no real AI integration.
 
-**Impact:** The app now has agent-like portfolio notes without external API
-calls. Future real agents can replace or extend `lib/portfolio-lab.ts`.
+**Impact:** The app now has agent-like portfolio and process notes without
+external AI API calls. Future real agents can replace or extend
+`lib/portfolio-lab.ts` and the mirror/journal workflow.
 
 **Related files:** `Memory/investor-os.md`, `Memory/local-data.md`
 

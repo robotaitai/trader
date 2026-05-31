@@ -38,12 +38,12 @@ product, or domain areas.
 - Source is a Next.js App Router app with TypeScript, Tailwind CSS, Recharts,
   TanStack Table, SheetJS/xlsx, lucide-react icons, and local shadcn-style UI
   primitives.
-- Main routes are `/overview`, `/holdings`, `/sectors`, and `/sync-settings`.
-  `/` redirects to `/overview`.
+- Main routes are `/overview`, `/holdings`, `/performance-lab`,
+  `/exposure-map`, `/sectors`, `/investor-mirror`, `/decision-journal`, and
+  `/sync-settings`. `/` redirects to `/overview`.
 - Data is local-only. `lib/storage.ts` reads and writes browser `localStorage`.
 - Demo data in `lib/mock-data.ts` is available only by explicit user action;
   the app no longer auto-seeds fake holdings as the active portfolio.
 - `private/` and `*.private.*` files are ignored by `.gitignore` for local real
   portfolio files. Do not force-add those files when preparing a public repo.
-- This directory is not currently a Git repository, so onboarding could not read
-  commit history or branches.
+- The repo has Git state; do not force-add ignored private portfolio files.

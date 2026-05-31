@@ -23,8 +23,8 @@ const navigation = [
   { label: "Performance Lab", href: "/performance-lab", icon: FlaskConical },
   { label: "Exposure Map", href: "/exposure-map", icon: Radar },
   { label: "Sectors", href: "/sectors", icon: PieChart },
-  { label: "Investor Mirror", href: "#", icon: BarChart3, disabled: true },
-  { label: "Decision Journal", href: "#", icon: ClipboardList, disabled: true },
+  { label: "Investor Mirror", href: "/investor-mirror", icon: BarChart3 },
+  { label: "Decision Journal", href: "/decision-journal", icon: ClipboardList },
   { label: "AI Coach", href: "#", icon: Brain, disabled: true },
   { label: "Sync Settings", href: "/sync-settings", icon: Settings2 },
 ];

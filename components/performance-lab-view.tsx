@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -34,9 +34,14 @@ import {
   calculateWeightedReturn,
   generatePerformanceInsights,
 } from "@/lib/portfolio-lab";
+import { normalizeTicker } from "@/lib/security-classification";
 import { usePortfolioData } from "@/lib/storage";
-import type { PriceHistoryPoint } from "@/lib/types";
-import type { PortfolioSnapshotRow, Transaction } from "@/lib/types";
+import type {
+  Holding,
+  PortfolioSnapshotRow,
+  PriceHistoryPoint,
+  Transaction,
+} from "@/lib/types";
 import {
   formatCurrency,
   formatCurrencyPrecise,
@@ -66,11 +71,36 @@ function LabMetric({
   );
 }
 
+function isClosedSnapshotRow(row: PortfolioSnapshotRow) {
+  return (
+    row.status === "Closed" ||
+    Boolean(row.soldDate) ||
+    Boolean(row.soldPrice) ||
+    Boolean(row.finalEarning)
+  );
+}
+
+function buildHistoryTickers(
+  holdings: Holding[],
+  snapshotRows: PortfolioSnapshotRow[],
+) {
+  const tickers = new Set(holdings.map((holding) => holding.ticker));
+
+  snapshotRows.forEach((row) => {
+    if (row.purchaseDate) {
+      tickers.add(normalizeTicker(row.ticker));
+    }
+  });
+
+  return Array.from(tickers).filter(Boolean);
+}
+
 export function PerformanceLabView() {
   const {
     holdings,
     summary,
     sectorExposure,
+    closedPositions,
     transactions,
     portfolioSnapshot,
     currentPrices,
@@ -81,11 +111,59 @@ export function PerformanceLabView() {
   const [focusedSector, setFocusedSector] = useState("All");
   const [focusedSectorShockPct, setFocusedSectorShockPct] = useState(-18);
   const [priceFetchStatus, setPriceFetchStatus] = useState("");
+  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
 
   const contributionRows = useMemo(
     () => calculateContributionRows(holdings),
     [holdings],
   );
+  const activeLotCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    portfolioSnapshot
+      .filter((row) => !isClosedSnapshotRow(row))
+      .forEach((row) => {
+        const ticker = normalizeTicker(row.ticker);
+        counts.set(ticker, (counts.get(ticker) ?? 0) + 1);
+      });
+
+    return counts;
+  }, [portfolioSnapshot]);
+  const closedByTicker = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        lots: number;
+        realizedPnl: number;
+        costBasis: number;
+      }
+    >();
+
+    closedPositions.forEach((position) => {
+      const existing = rows.get(position.ticker) ?? {
+        lots: 0,
+        realizedPnl: 0,
+        costBasis: 0,
+      };
+      existing.lots += 1;
+      existing.realizedPnl += position.realizedPnl;
+      existing.costBasis += position.costBasis;
+      rows.set(position.ticker, existing);
+    });
+
+    return new Map(
+      Array.from(rows.entries()).map(([ticker, row]) => [
+        ticker,
+        {
+          lots: row.lots,
+          realizedPnl: row.realizedPnl,
+          realizedPnlPct: row.costBasis
+            ? (row.realizedPnl / row.costBasis) * 100
+            : 0,
+        },
+      ]),
+    );
+  }, [closedPositions]);
   const scenarioRows = useMemo(
     () =>
       calculateScenarioRows(
@@ -122,18 +200,28 @@ export function PerformanceLabView() {
     ? "daily-prices"
     : "estimated";
   const priceHistoryTickers = new Set(priceHistory.map((point) => point.ticker));
+  const incompleteSnapshotRows = portfolioSnapshot.filter(
+    (row) =>
+      (row.status === "Active" || isClosedSnapshotRow(row)) &&
+      !row.purchaseDate,
+  );
   const missingHistoryTickers = holdings
     .map((holding) => holding.ticker)
     .filter((ticker) => priceHistory.length > 0 && !priceHistoryTickers.has(ticker));
 
-  async function refreshPriceHistory() {
-    const tickers = Array.from(new Set(holdings.map((holding) => holding.ticker)));
+  const refreshPriceHistory = useCallback(async (trigger: "auto" | "manual" = "manual") => {
+    const tickers = buildHistoryTickers(holdings, portfolioSnapshot);
     if (!tickers.length) {
       setPriceFetchStatus("Import holdings before fetching price history.");
       return;
     }
 
-    setPriceFetchStatus("Fetching daily adjusted closes...");
+    setIsFetchingPrices(true);
+    setPriceFetchStatus(
+      trigger === "auto"
+        ? "Fetching daily adjusted closes automatically..."
+        : "Fetching daily adjusted closes...",
+    );
     const from = findEarliestPortfolioDate(transactions, portfolioSnapshot);
     const to = new Date().toISOString().slice(0, 10);
     const response = await fetch(
@@ -142,6 +230,7 @@ export function PerformanceLabView() {
 
     if (!response.ok) {
       setPriceFetchStatus("Price history fetch failed. Try again later.");
+      setIsFetchingPrices(false);
       return;
     }
 
@@ -151,12 +240,19 @@ export function PerformanceLabView() {
     };
 
     setPriceHistory(payload.prices);
+    setIsFetchingPrices(false);
     setPriceFetchStatus(
       payload.errors?.length
         ? `Fetched ${payload.prices.length.toLocaleString()} daily prices. Missing: ${payload.errors.map((error) => error.ticker).join(", ")}.`
         : `Fetched ${payload.prices.length.toLocaleString()} daily prices from Yahoo Finance.`,
     );
-  }
+  }, [holdings, portfolioSnapshot, setPriceHistory, transactions]);
+
+  useEffect(() => {
+    if (holdings.length > 0 && priceHistory.length === 0 && !priceFetchStatus) {
+      void refreshPriceHistory("auto");
+    }
+  }, [holdings.length, priceHistory.length, priceFetchStatus, refreshPriceHistory]);
 
   return (
     <AppShell>
@@ -229,8 +325,13 @@ export function PerformanceLabView() {
                     Clear prices
                   </Button>
                 ) : null}
-                <Button size="sm" variant="outline" onClick={refreshPriceHistory}>
-                  Fetch daily prices
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => refreshPriceHistory("manual")}
+                  disabled={isFetchingPrices}
+                >
+                  {isFetchingPrices ? "Fetching..." : "Fetch daily prices"}
                 </Button>
               </div>
             </div>
@@ -249,6 +350,15 @@ export function PerformanceLabView() {
             {missingHistoryTickers.length > 0 ? (
               <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 Missing price history for {missingHistoryTickers.join(", ")}.
+              </div>
+            ) : null}
+            {incompleteSnapshotRows.length > 0 ? (
+              <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                {incompleteSnapshotRows.length} snapshot row
+                {incompleteSnapshotRows.length === 1 ? "" : "s"} missing purchase
+                dates are excluded from monthly performance. Holdings and active
+                P&L still use those rows, but month-by-month returns need dated
+                lots to avoid false spikes.
               </div>
             ) : null}
             {monthlyPerformance.length ? (
@@ -356,7 +466,7 @@ export function PerformanceLabView() {
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_0.9fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Position Contribution</CardTitle>
+            <CardTitle>Active Position Contribution</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -458,6 +568,68 @@ export function PerformanceLabView() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-5">
+        <CardHeader>
+          <CardTitle>Open vs Closed Lot Contribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-4 rounded-md border bg-gray-50 p-3 text-xs leading-5 text-muted-foreground">
+            This separates active unrealized performance from closed realized
+            lots. If a ticker appears in both places, the active return is only
+            for the still-open position.
+          </div>
+          <Table className="text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ticker</TableHead>
+                <TableHead className="text-right">Open Lots</TableHead>
+                <TableHead className="text-right">Active Value</TableHead>
+                <TableHead className="text-right">Active P&L</TableHead>
+                <TableHead className="text-right">Active Return</TableHead>
+                <TableHead className="text-right">Closed Lots</TableHead>
+                <TableHead className="text-right">Closed P&L</TableHead>
+                <TableHead>Read</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {holdings.map((holding) => {
+                const closed = closedByTicker.get(holding.ticker);
+                const activeLots = activeLotCounts.get(holding.ticker) ?? 1;
+
+                return (
+                  <TableRow key={holding.ticker}>
+                    <TableCell className="font-semibold">{holding.ticker}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {activeLots}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrencyPrecise(holding.marketValue)}
+                    </TableCell>
+                    <TableCell className={`text-right tabular-nums ${pnlClass(holding.unrealizedPnl)}`}>
+                      {formatCurrencyPrecise(holding.unrealizedPnl)}
+                    </TableCell>
+                    <TableCell className={`text-right tabular-nums ${pnlClass(holding.unrealizedPnlPct)}`}>
+                      {formatPct(holding.unrealizedPnlPct)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {closed?.lots ?? 0}
+                    </TableCell>
+                    <TableCell className={`text-right tabular-nums ${pnlClass(closed?.realizedPnl ?? 0)}`}>
+                      {closed ? formatCurrencyPrecise(closed.realizedPnl) : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {closed
+                        ? "Has closed history; active return excludes realized lots"
+                        : "Active position only"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_0.9fr]">
         <Card>

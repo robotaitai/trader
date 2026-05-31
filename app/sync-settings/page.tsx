@@ -20,6 +20,7 @@ import { usePortfolioData } from "@/lib/storage";
 import type {
   PortfolioSnapshotRow,
   PortfolioSnapshotStatus,
+  PriceHistoryPoint,
   Transaction,
   TransactionAction,
 } from "@/lib/types";
@@ -214,6 +215,12 @@ function normalizeSnapshotStatus(value: unknown): PortfolioSnapshotStatus | null
   return "Active";
 }
 
+function twoWeeksAgo() {
+  const date = new Date();
+  date.setDate(date.getDate() - 14);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildSnapshotRows(rows: RawRow[]) {
   const errors: string[] = [];
   const importedAt = Date.now();
@@ -313,6 +320,7 @@ export default function SyncSettingsPage() {
     portfolioSnapshot,
     setTransactions,
     setPortfolioSnapshot,
+    setPriceHistory,
     loadDemoData,
     clearLocalData,
   } = usePortfolioData();
@@ -326,6 +334,7 @@ export default function SyncSettingsPage() {
   const [snapshotPreview, setSnapshotPreview] = useState<PortfolioSnapshotRow[]>([]);
   const [snapshotErrors, setSnapshotErrors] = useState<string[]>([]);
   const [snapshotMessage, setSnapshotMessage] = useState("");
+  const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
 
   const missingRequiredFields = useMemo(
     () => requiredFields.filter((field) => !columnMap[field]),
@@ -363,6 +372,7 @@ export default function SyncSettingsPage() {
     }
 
     setTransactions(result.transactions);
+    setPriceHistory([]);
     setImportMessage(
       `Imported ${result.transactions.length} transactions from ${fileName}. Dashboard values now use this local ledger.`,
     );
@@ -412,8 +422,82 @@ export default function SyncSettingsPage() {
     }
 
     setPortfolioSnapshot(snapshotPreview);
+    setPriceHistory([]);
     setSnapshotMessage(
       `Saved ${snapshotPreview.length} status rows locally. Active rows now drive Overview, Holdings, and Sectors.`,
+    );
+  }
+
+  async function updateSavedSnapshotPrices() {
+    setSnapshotErrors([]);
+    setSnapshotMessage("");
+
+    const activeTickers = Array.from(
+      new Set(
+        portfolioSnapshot
+          .filter((row) => row.status === "Active")
+          .map((row) => normalizeTicker(row.ticker))
+          .filter(Boolean),
+      ),
+    );
+
+    if (activeTickers.length === 0) {
+      setSnapshotErrors(["Save an active portfolio snapshot before updating prices."]);
+      return;
+    }
+
+    setIsUpdatingPrices(true);
+    const to = new Date().toISOString().slice(0, 10);
+    const response = await fetch(
+      `/api/price-history?tickers=${encodeURIComponent(activeTickers.join(","))}&from=${twoWeeksAgo()}&to=${to}`,
+    );
+
+    if (!response.ok) {
+      setIsUpdatingPrices(false);
+      setSnapshotErrors(["Could not update prices. Try again later."]);
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      prices: PriceHistoryPoint[];
+      errors?: Array<{ ticker: string; error: string }>;
+    };
+    const latestPrices = new Map<string, PriceHistoryPoint>();
+
+    payload.prices.forEach((point) => {
+      const ticker = normalizeTicker(point.ticker);
+      const existing = latestPrices.get(ticker);
+      if (!existing || point.date > existing.date) {
+        latestPrices.set(ticker, point);
+      }
+    });
+
+    const nextSnapshot = portfolioSnapshot.map((row) => {
+      if (row.status !== "Active") return row;
+
+      const latest = latestPrices.get(normalizeTicker(row.ticker));
+      if (!latest) return row;
+
+      const valueUsd = row.shares * latest.close;
+      const activeEarning = valueUsd - row.costBasis;
+
+      return {
+        ...row,
+        currentPrice: latest.close,
+        valueUsd,
+        activeEarning,
+        earningsPct: row.costBasis ? (activeEarning / row.costBasis) * 100 : 0,
+      };
+    });
+
+    setPortfolioSnapshot(nextSnapshot);
+    setSnapshotPreview(nextSnapshot);
+    setPriceHistory([]);
+    setIsUpdatingPrices(false);
+    setSnapshotMessage(
+      payload.errors?.length
+        ? `Updated prices for ${latestPrices.size} tickers. Missing: ${payload.errors.map((error) => error.ticker).join(", ")}.`
+        : `Updated current prices for ${latestPrices.size} active tickers and recalculated local snapshot values.`,
     );
   }
 
@@ -479,10 +563,18 @@ export default function SyncSettingsPage() {
                 onClick={() => {
                   setPortfolioSnapshot([]);
                   setSnapshotPreview([]);
+                  setPriceHistory([]);
                   setSnapshotMessage("Cleared the saved status snapshot.");
                 }}
               >
                 Clear saved status
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void updateSavedSnapshotPrices()}
+                disabled={portfolioSnapshot.length === 0 || isUpdatingPrices}
+              >
+                {isUpdatingPrices ? "Updating prices..." : "Update current prices"}
               </Button>
             </div>
 
