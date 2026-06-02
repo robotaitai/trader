@@ -126,6 +126,18 @@ snapshots. It fetches recent daily prices through `/api/price-history`, updates
 active rows' `currentPrice`, `valueUsd`, `activeEarning`, and `earningsPct`, and
 clears stale price history.
 
+Snapshot saves and transaction imports should also fetch daily adjusted-close
+history through `/api/price-history` immediately after local save. The fetched
+rows are persisted in `investor-os.price-history` so Overview and Performance
+Lab can use daily/weekly market history without requiring the user to visit
+Performance Lab first. Snapshot saves may update active rows to the latest
+fetched close when available.
+
+For GitHub Pages/static mode, users can include a `Price History` sheet in the
+Investor OS workbook. Sync Settings detects `Price History`, `Prices`, or
+`Daily Prices` sheets and persists rows with `date`, `ticker`, and `close`
+columns to `investor-os.price-history` instead of requiring the server API.
+
 Decision Journal entries are stored locally under `investor-os.decision-journal`
 and are read by Investor Mirror for process analysis.
 
@@ -141,6 +153,18 @@ and Active Earning. Header matching normalizes punctuation and casing.
 
 Snapshot number parsing accepts `$`, `₪`, quotes, commas, percent signs, and
 spaces.
+
+Sync Settings can generate an `investor-os-template.xlsx` workbook in the
+browser. It includes Portfolio Snapshot, Transactions, Price History, Security
+Metadata, and Instructions sheets. This is the preferred public-site workflow:
+users download the workbook, fill it manually or with help from ChatGPT, then
+upload it into the local viewer.
+
+Spreadsheet snapshot exports can include template rows after the real
+positions. These rows may have blank ticker/share/purchase-price fields while
+formula columns still contain `$0` or `#DIV/0!`. The snapshot parser skips rows
+where ticker, shares, and purchase price are all blank, and only errors on rows
+that appear to contain a real position but are malformed.
 
 ## Private Data
 

@@ -14,12 +14,15 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { InsightList } from "@/components/insight-list";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -155,6 +158,55 @@ export function ExposureMapView() {
     weightPct: sector.weightPct,
     unrealizedPnl: sector.unrealizedPnl,
   }));
+  const {
+    sortedData: sortedSectorExposure,
+    sortConfig: sectorDetailSortConfig,
+    toggleSort: toggleSectorDetailSort,
+  } = useSortableData(
+    sectorExposure,
+    [
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "weightPct", getValue: (row) => row.weightPct },
+      { id: "value", getValue: (row) => row.value },
+      { id: "costBasis", getValue: (row) => row.costBasis },
+      { id: "unrealizedPnl", getValue: (row) => row.unrealizedPnl },
+    ],
+    { id: "value", direction: "desc" },
+  );
+  const {
+    sortedData: sortedTiles,
+    sortConfig: tileSortConfig,
+    toggleSort: toggleTileSort,
+  } = useSortableData(
+    tiles,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "marketValue", getValue: (row) => row.marketValue },
+      { id: "weightPct", getValue: (row) => row.weightPct },
+      { id: "unrealizedPnlPct", getValue: (row) => row.unrealizedPnlPct },
+      { id: "role", getValue: (row) => getExposureRole(row) },
+    ],
+    { id: "marketValue", direction: "desc" },
+  );
+  const {
+    sortedData: sortedClosedPositions,
+    sortConfig: closedSortConfig,
+    toggleSort: toggleClosedSort,
+  } = useSortableData(
+    closedPositions,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "quantity", getValue: (row) => row.quantity },
+      { id: "costBasis", getValue: (row) => row.costBasis },
+      { id: "proceeds", getValue: (row) => row.proceeds },
+      { id: "realizedPnl", getValue: (row) => row.realizedPnl },
+      { id: "realizedPnlPct", getValue: (row) => row.realizedPnlPct },
+      { id: "soldDate", getValue: (row) => row.soldDate },
+    ],
+    { id: "realizedPnl", direction: "desc" },
+  );
 
   return (
     <AppShell>
@@ -300,15 +352,15 @@ export function ExposureMapView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Sector</TableHead>
-                  <TableHead className="text-right">Weight</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead className="text-right">Investment</TableHead>
-                  <TableHead className="text-right">P&L</TableHead>
+                  <SortableTableHead id="sector" label="Sector" sortConfig={sectorDetailSortConfig} onSort={toggleSectorDetailSort} />
+                  <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={sectorDetailSortConfig} onSort={toggleSectorDetailSort} />
+                  <SortableTableHead id="value" label="Value" align="right" sortConfig={sectorDetailSortConfig} onSort={toggleSectorDetailSort} />
+                  <SortableTableHead id="costBasis" label="Investment" align="right" sortConfig={sectorDetailSortConfig} onSort={toggleSectorDetailSort} />
+                  <SortableTableHead id="unrealizedPnl" label="P&L" align="right" sortConfig={sectorDetailSortConfig} onSort={toggleSectorDetailSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sectorExposure.map((sector) => (
+                {sortedSectorExposure.map((sector) => (
                   <TableRow key={sector.sector}>
                     <TableCell className="font-medium">{sector.sector}</TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -462,16 +514,16 @@ export function ExposureMapView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Sector</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead className="text-right">Weight</TableHead>
-                  <TableHead className="text-right">Unrealized %</TableHead>
-                  <TableHead>Portfolio Role</TableHead>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={tileSortConfig} onSort={toggleTileSort} />
+                  <SortableTableHead id="sector" label="Sector" sortConfig={tileSortConfig} onSort={toggleTileSort} />
+                  <SortableTableHead id="marketValue" label="Value" align="right" sortConfig={tileSortConfig} onSort={toggleTileSort} />
+                  <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={tileSortConfig} onSort={toggleTileSort} />
+                  <SortableTableHead id="unrealizedPnlPct" label="Unrealized %" align="right" sortConfig={tileSortConfig} onSort={toggleTileSort} />
+                  <SortableTableHead id="role" label="Portfolio Role" sortConfig={tileSortConfig} onSort={toggleTileSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tiles.map((tile) => (
+                {sortedTiles.map((tile) => (
                   <TableRow key={tile.ticker}>
                     <TableCell className="font-semibold">{tile.ticker}</TableCell>
                     <TableCell>{tile.sector}</TableCell>
@@ -508,18 +560,18 @@ export function ExposureMapView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Sector</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Cost Basis</TableHead>
-                  <TableHead className="text-right">Proceeds</TableHead>
-                  <TableHead className="text-right">Realized P&L</TableHead>
-                  <TableHead className="text-right">Realized %</TableHead>
-                  <TableHead>Closed</TableHead>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="sector" label="Sector" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="quantity" label="Qty" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="costBasis" label="Cost Basis" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="proceeds" label="Proceeds" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="realizedPnl" label="Realized P&L" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="realizedPnlPct" label="Realized %" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                  <SortableTableHead id="soldDate" label="Closed" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {closedPositions.map((position) => (
+                {sortedClosedPositions.map((position) => (
                   <TableRow key={`${position.ticker}-${position.soldDate ?? "closed"}`}>
                     <TableCell className="font-semibold">{position.ticker}</TableCell>
                     <TableCell>{position.sector}</TableCell>

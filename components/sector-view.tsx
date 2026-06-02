@@ -14,13 +14,16 @@ import {
 } from "recharts";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -47,6 +50,19 @@ function AllocationTable({
   rows: SectorExposure[];
   title: string;
 }) {
+  const { sortedData, sortConfig, toggleSort } = useSortableData(
+    rows,
+    [
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "value", getValue: (row) => row.value },
+      { id: "costBasis", getValue: (row) => row.costBasis },
+      { id: "unrealizedPnl", getValue: (row) => row.unrealizedPnl },
+      { id: "weightPct", getValue: (row) => row.weightPct },
+      { id: "positions", getValue: (row) => row.positions },
+    ],
+    { id: "value", direction: "desc" },
+  );
+
   return (
     <Card>
       <CardHeader>
@@ -57,16 +73,16 @@ function AllocationTable({
           <Table className="text-xs">
             <TableHeader>
               <TableRow>
-                <TableHead>Bucket</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead className="text-right">Cost Basis</TableHead>
-                <TableHead className="text-right">Unrealized P&L</TableHead>
-                <TableHead className="text-right">Weight</TableHead>
-                <TableHead className="text-right">Positions</TableHead>
+                <SortableTableHead id="sector" label="Bucket" sortConfig={sortConfig} onSort={toggleSort} />
+                <SortableTableHead id="value" label="Value" align="right" sortConfig={sortConfig} onSort={toggleSort} />
+                <SortableTableHead id="costBasis" label="Cost Basis" align="right" sortConfig={sortConfig} onSort={toggleSort} />
+                <SortableTableHead id="unrealizedPnl" label="Unrealized P&L" align="right" sortConfig={sortConfig} onSort={toggleSort} />
+                <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={sortConfig} onSort={toggleSort} />
+                <SortableTableHead id="positions" label="Positions" align="right" sortConfig={sortConfig} onSort={toggleSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((sector) => (
+              {sortedData.map((sector) => (
                 <TableRow key={sector.sector}>
                   <TableCell className="font-medium">{sector.sector}</TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -108,6 +124,21 @@ export function SectorView() {
   );
   const unclassifiedHoldings = holdings.filter((holding) =>
     holding.sector.startsWith("Unclassified"),
+  );
+  const {
+    sortedData: sortedUnclassifiedHoldings,
+    sortConfig: unclassifiedSortConfig,
+    toggleSort: toggleUnclassifiedSort,
+  } = useSortableData(
+    unclassifiedHoldings,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "name", getValue: (row) => row.name },
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "marketValue", getValue: (row) => row.marketValue },
+      { id: "weightPct", getValue: (row) => row.weightPct },
+    ],
+    { id: "weightPct", direction: "desc" },
   );
   const largestStockSector = stockSectors[0];
   const largestFundSleeve = fundSleeves[0];
@@ -305,15 +336,15 @@ export function SectorView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Current Bucket</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead className="text-right">Weight</TableHead>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={unclassifiedSortConfig} onSort={toggleUnclassifiedSort} />
+                  <SortableTableHead id="name" label="Name" sortConfig={unclassifiedSortConfig} onSort={toggleUnclassifiedSort} />
+                  <SortableTableHead id="sector" label="Current Bucket" sortConfig={unclassifiedSortConfig} onSort={toggleUnclassifiedSort} />
+                  <SortableTableHead id="marketValue" label="Value" align="right" sortConfig={unclassifiedSortConfig} onSort={toggleUnclassifiedSort} />
+                  <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={unclassifiedSortConfig} onSort={toggleUnclassifiedSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {unclassifiedHoldings.map((holding) => (
+                {sortedUnclassifiedHoldings.map((holding) => (
                   <TableRow key={holding.ticker}>
                     <TableCell className="font-semibold">{holding.ticker}</TableCell>
                     <TableCell>{holding.name}</TableCell>

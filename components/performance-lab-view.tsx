@@ -16,6 +16,10 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { InsightList } from "@/components/insight-list";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +27,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -94,6 +97,17 @@ function buildHistoryTickers(
 
   return Array.from(tickers).filter(Boolean);
 }
+
+type LotContributionRow = {
+  ticker: string;
+  activeLots: number;
+  activeValue: number;
+  activePnl: number;
+  activeReturn: number;
+  closedLots: number;
+  closedPnl: number;
+  read: string;
+};
 
 export function PerformanceLabView() {
   const {
@@ -195,6 +209,76 @@ export function PerformanceLabView() {
         priceHistory,
       ),
     [transactions, portfolioSnapshot, currentPrices, priceHistory],
+  );
+  const monthlyLedgerRows = monthlyPerformance.slice(-12);
+  const {
+    sortedData: sortedMonthlyLedgerRows,
+    sortConfig: monthlySortConfig,
+    toggleSort: toggleMonthlySort,
+  } = useSortableData(
+    monthlyLedgerRows,
+    [
+      { id: "month", getValue: (row) => row.month },
+      { id: "returnPct", getValue: (row) => row.returnPct },
+      { id: "gainLoss", getValue: (row) => row.gainLoss },
+      { id: "netFlow", getValue: (row) => row.netFlow },
+      { id: "endingValue", getValue: (row) => row.endingValue },
+    ],
+    { id: "month", direction: "asc" },
+  );
+  const lotContributionRows = useMemo<LotContributionRow[]>(
+    () =>
+      holdings.map((holding) => {
+        const closed = closedByTicker.get(holding.ticker);
+
+        return {
+          ticker: holding.ticker,
+          activeLots: activeLotCounts.get(holding.ticker) ?? 1,
+          activeValue: holding.marketValue,
+          activePnl: holding.unrealizedPnl,
+          activeReturn: holding.unrealizedPnlPct,
+          closedLots: closed?.lots ?? 0,
+          closedPnl: closed?.realizedPnl ?? 0,
+          read: closed
+            ? "Has closed history; active return excludes realized lots"
+            : "Active position only",
+        };
+      }),
+    [activeLotCounts, closedByTicker, holdings],
+  );
+  const {
+    sortedData: sortedLotContributionRows,
+    sortConfig: lotSortConfig,
+    toggleSort: toggleLotSort,
+  } = useSortableData(
+    lotContributionRows,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "activeLots", getValue: (row) => row.activeLots },
+      { id: "activeValue", getValue: (row) => row.activeValue },
+      { id: "activePnl", getValue: (row) => row.activePnl },
+      { id: "activeReturn", getValue: (row) => row.activeReturn },
+      { id: "closedLots", getValue: (row) => row.closedLots },
+      { id: "closedPnl", getValue: (row) => row.closedPnl },
+      { id: "read", getValue: (row) => row.read },
+    ],
+    { id: "activeValue", direction: "desc" },
+  );
+  const {
+    sortedData: sortedScenarioRows,
+    sortConfig: scenarioSortConfig,
+    toggleSort: toggleScenarioSort,
+  } = useSortableData(
+    scenarioRows,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "name", getValue: (row) => row.name },
+      { id: "currentValue", getValue: (row) => row.currentValue },
+      { id: "scenarioValue", getValue: (row) => row.scenarioValue },
+      { id: "delta", getValue: (row) => row.delta },
+      { id: "scenarioPnl", getValue: (row) => row.scenarioPnl },
+    ],
+    { id: "delta", direction: "asc" },
   );
   const monthlyDataSource = priceHistory.length > 0
     ? "daily-prices"
@@ -426,15 +510,15 @@ export function PerformanceLabView() {
               <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead className="text-right">Return</TableHead>
-                    <TableHead className="text-right">Gain/Loss</TableHead>
-                    <TableHead className="text-right">Net Flow</TableHead>
-                    <TableHead className="text-right">End Value</TableHead>
+                    <SortableTableHead id="month" label="Month" sortConfig={monthlySortConfig} onSort={toggleMonthlySort} />
+                    <SortableTableHead id="returnPct" label="Return" align="right" sortConfig={monthlySortConfig} onSort={toggleMonthlySort} />
+                    <SortableTableHead id="gainLoss" label="Gain/Loss" align="right" sortConfig={monthlySortConfig} onSort={toggleMonthlySort} />
+                    <SortableTableHead id="netFlow" label="Net Flow" align="right" sortConfig={monthlySortConfig} onSort={toggleMonthlySort} />
+                    <SortableTableHead id="endingValue" label="End Value" align="right" sortConfig={monthlySortConfig} onSort={toggleMonthlySort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {monthlyPerformance.slice(-12).map((row) => (
+                  {sortedMonthlyLedgerRows.map((row) => (
                     <TableRow key={row.month}>
                       <TableCell className="font-medium">{row.label}</TableCell>
                       <TableCell className={`text-right tabular-nums ${pnlClass(row.returnPct)}`}>
@@ -582,50 +666,41 @@ export function PerformanceLabView() {
           <Table className="text-xs">
             <TableHeader>
               <TableRow>
-                <TableHead>Ticker</TableHead>
-                <TableHead className="text-right">Open Lots</TableHead>
-                <TableHead className="text-right">Active Value</TableHead>
-                <TableHead className="text-right">Active P&L</TableHead>
-                <TableHead className="text-right">Active Return</TableHead>
-                <TableHead className="text-right">Closed Lots</TableHead>
-                <TableHead className="text-right">Closed P&L</TableHead>
-                <TableHead>Read</TableHead>
+                <SortableTableHead id="ticker" label="Ticker" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="activeLots" label="Open Lots" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="activeValue" label="Active Value" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="activePnl" label="Active P&L" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="activeReturn" label="Active Return" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="closedLots" label="Closed Lots" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="closedPnl" label="Closed P&L" align="right" sortConfig={lotSortConfig} onSort={toggleLotSort} />
+                <SortableTableHead id="read" label="Read" sortConfig={lotSortConfig} onSort={toggleLotSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {holdings.map((holding) => {
-                const closed = closedByTicker.get(holding.ticker);
-                const activeLots = activeLotCounts.get(holding.ticker) ?? 1;
-
-                return (
-                  <TableRow key={holding.ticker}>
-                    <TableCell className="font-semibold">{holding.ticker}</TableCell>
+              {sortedLotContributionRows.map((row) => (
+                  <TableRow key={row.ticker}>
+                    <TableCell className="font-semibold">{row.ticker}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {activeLots}
+                      {row.activeLots}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {formatCurrencyPrecise(holding.marketValue)}
+                      {formatCurrencyPrecise(row.activeValue)}
                     </TableCell>
-                    <TableCell className={`text-right tabular-nums ${pnlClass(holding.unrealizedPnl)}`}>
-                      {formatCurrencyPrecise(holding.unrealizedPnl)}
+                    <TableCell className={`text-right tabular-nums ${pnlClass(row.activePnl)}`}>
+                      {formatCurrencyPrecise(row.activePnl)}
                     </TableCell>
-                    <TableCell className={`text-right tabular-nums ${pnlClass(holding.unrealizedPnlPct)}`}>
-                      {formatPct(holding.unrealizedPnlPct)}
+                    <TableCell className={`text-right tabular-nums ${pnlClass(row.activeReturn)}`}>
+                      {formatPct(row.activeReturn)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {closed?.lots ?? 0}
+                      {row.closedLots}
                     </TableCell>
-                    <TableCell className={`text-right tabular-nums ${pnlClass(closed?.realizedPnl ?? 0)}`}>
-                      {closed ? formatCurrencyPrecise(closed.realizedPnl) : "-"}
+                    <TableCell className={`text-right tabular-nums ${pnlClass(row.closedPnl)}`}>
+                      {row.closedLots ? formatCurrencyPrecise(row.closedPnl) : "-"}
                     </TableCell>
-                    <TableCell>
-                      {closed
-                        ? "Has closed history; active return excludes realized lots"
-                        : "Active position only"}
-                    </TableCell>
+                    <TableCell>{row.read}</TableCell>
                   </TableRow>
-                );
-              })}
+              ))}
             </TableBody>
           </Table>
         </CardContent>
@@ -640,17 +715,16 @@ export function PerformanceLabView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="text-right">Current</TableHead>
-                  <TableHead className="text-right">Scenario</TableHead>
-                  <TableHead className="text-right">Delta</TableHead>
-                  <TableHead className="text-right">Scenario P&L</TableHead>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
+                  <SortableTableHead id="name" label="Name" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
+                  <SortableTableHead id="currentValue" label="Current" align="right" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
+                  <SortableTableHead id="scenarioValue" label="Scenario" align="right" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
+                  <SortableTableHead id="delta" label="Delta" align="right" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
+                  <SortableTableHead id="scenarioPnl" label="Scenario P&L" align="right" sortConfig={scenarioSortConfig} onSort={toggleScenarioSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {scenarioRows
-                  .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+                {sortedScenarioRows
                   .map((row) => (
                     <TableRow key={row.ticker}>
                       <TableCell className="font-semibold">{row.ticker}</TableCell>

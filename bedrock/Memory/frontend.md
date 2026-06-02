@@ -22,7 +22,8 @@ updated: 2026-05-31
 
 Routes live under `app/`:
 
-- `app/page.tsx` redirects to `/overview`
+- `app/page.tsx` renders the Overview dashboard directly so the GitHub Pages
+  root works as the first screen
 - `app/api/price-history/route.ts`
 - `app/overview/page.tsx`
 - `app/holdings/page.tsx`
@@ -44,6 +45,7 @@ Shared UI lives under `components/`:
 - `decision-journal-view.tsx`
 - `insight-list.tsx`
 - `sector-view.tsx`
+- `sortable-table.tsx`
 - `page-header.tsx`
 - `components/ui/*`
 
@@ -64,9 +66,10 @@ monthly performance from `calculateMonthlyPerformance`, contribution rows from
 `calculateContributionRows`, exposure roles from `getExposureRole`, and local
 risk notes from `generateExposureInsights`. It also has an in-page ticker info
 panel rather than a separate route or external company-profile service. Its
-value chart should use canonical `YYYY-MM` x-values, range controls, sparse
-year-aware tick labels, and full month/year tooltip labels so it scales beyond
-one calendar year.
+performance chart should support value, flow-adjusted return, and candle-style
+views, with daily/weekly/monthly/quarterly/yearly aggregation where daily price
+history exists, range controls, readable legends, and compact currency axes
+that scale beyond one calendar year.
 
 Sectors is no longer a single donut-only view. It has top summary cards,
 economic sector aggregation, a horizontal stock-sector weight chart, ETF/fund
@@ -85,6 +88,10 @@ The app uses dense readable tables and cards with modest radius. Charts disable
 Recharts animation so rendered chart elements are visible during automated and
 headless checks.
 
+Most analytics tables use `components/sortable-table.tsx` for click-to-sort
+headers. Holdings uses TanStack Table sorting directly. Data columns should be
+sortable by default; action/info-only columns can remain static.
+
 ## Commands
 
 - `npm run dev`
@@ -100,3 +107,10 @@ is deprecated and can become interactive in new projects.
 GitHub Actions workflow lives at `.github/workflows/ci.yml`. It runs on pushes
 to `main` and pull requests, uses Node 22 with npm cache, installs with
 `npm ci`, then runs `npm run lint` and `npm run build`.
+
+GitHub Pages deployment lives at `.github/workflows/pages.yml`. It builds a
+static export with `NEXT_OUTPUT=export` and `NEXT_PUBLIC_BASE_PATH=/trader`,
+then deploys `out/` through GitHub Pages. Because GitHub Pages cannot run
+server routes, the workflow removes `app/api` only inside the disposable Actions
+workspace before the static export. The API route remains in source for local
+development and serverless hosts.

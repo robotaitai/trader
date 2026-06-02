@@ -1,17 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { UploadCloud } from "lucide-react";
+import { FileDown, UploadCloud } from "lucide-react";
 import * as XLSX from "xlsx";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -179,8 +182,19 @@ const snapshotAliases: Record<string, string[]> = {
   activeEarning: ["activeearning", "unrealizedpnl", "unrealizedearning"],
 };
 
+const priceHistoryAliases: Record<string, string[]> = {
+  ticker: ["ticker", "symbol"],
+  date: ["date", "pricedate", "tradingdate"],
+  close: ["close", "adjustedclose", "adjclose", "price", "currentprice"],
+};
+
 function findColumn(row: RawRow, field: string) {
   const aliases = snapshotAliases[field];
+  return Object.keys(row).find((key) => aliases.includes(normalizeHeader(key)));
+}
+
+function findPriceHistoryColumn(row: RawRow, field: string) {
+  const aliases = priceHistoryAliases[field];
   return Object.keys(row).find((key) => aliases.includes(normalizeHeader(key)));
 }
 
@@ -193,16 +207,25 @@ function parseRowsFromText(text: string) {
   });
 }
 
-async function parseRowsFromFile(file: File) {
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, {
-    type: "array",
-    cellDates: true,
-  });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<RawRow>(firstSheet, {
+function sheetRows(workbook: XLSX.WorkBook, sheetName: string) {
+  return XLSX.utils.sheet_to_json<RawRow>(workbook.Sheets[sheetName], {
     defval: "",
     raw: false,
+  });
+}
+
+function findSheetName(workbook: XLSX.WorkBook, candidates: string[]) {
+  const normalizedCandidates = candidates.map(normalizeHeader);
+  return workbook.SheetNames.find((sheetName) =>
+    normalizedCandidates.includes(normalizeHeader(sheetName)),
+  );
+}
+
+async function parseWorkbookFromFile(file: File) {
+  const arrayBuffer = await file.arrayBuffer();
+  return XLSX.read(arrayBuffer, {
+    type: "array",
+    cellDates: true,
   });
 }
 
@@ -221,8 +244,193 @@ function twoWeeksAgo() {
   return date.toISOString().slice(0, 10);
 }
 
+function threeYearsAgo() {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 3);
+  return date.toISOString().slice(0, 10);
+}
+
+function uniqueTickers(values: string[]) {
+  return Array.from(new Set(values.map(normalizeTicker).filter(Boolean)));
+}
+
+function snapshotTickers(snapshotRows: PortfolioSnapshotRow[]) {
+  return uniqueTickers(snapshotRows.map((row) => row.ticker));
+}
+
+function transactionTickers(transactions: Transaction[]) {
+  return uniqueTickers(transactions.map((transaction) => transaction.ticker));
+}
+
+function findEarliestPortfolioDate(
+  transactions: Transaction[],
+  snapshotRows: PortfolioSnapshotRow[],
+) {
+  const dates = [
+    ...transactions.map((transaction) => transaction.date),
+    ...snapshotRows.flatMap((row) => [row.purchaseDate, row.soldDate]),
+  ]
+    .filter((date): date is string => Boolean(date))
+    .map((date) => new Date(date))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  return (dates[0] ?? new Date(threeYearsAgo())).toISOString().slice(0, 10);
+}
+
+function latestPricesByTicker(prices: PriceHistoryPoint[]) {
+  const latestPrices = new Map<string, PriceHistoryPoint>();
+
+  prices.forEach((point) => {
+    const ticker = normalizeTicker(point.ticker);
+    const existing = latestPrices.get(ticker);
+    if (!existing || point.date > existing.date) {
+      latestPrices.set(ticker, point);
+    }
+  });
+
+  return latestPrices;
+}
+
+function updateSnapshotWithLatestPrices(
+  snapshotRows: PortfolioSnapshotRow[],
+  prices: PriceHistoryPoint[],
+) {
+  const latestPrices = latestPricesByTicker(prices);
+
+  return snapshotRows.map((row) => {
+    if (row.status !== "Active") return row;
+
+    const latest = latestPrices.get(normalizeTicker(row.ticker));
+    if (!latest) return row;
+
+    const valueUsd = row.shares * latest.close;
+    const activeEarning = valueUsd - row.costBasis;
+
+    return {
+      ...row,
+      currentPrice: latest.close,
+      valueUsd,
+      activeEarning,
+      earningsPct: row.costBasis ? (activeEarning / row.costBasis) * 100 : 0,
+    };
+  });
+}
+
+function buildPriceHistoryRows(rows: RawRow[]) {
+  const prices: PriceHistoryPoint[] = [];
+
+  rows.forEach((row) => {
+    const tickerColumn = findPriceHistoryColumn(row, "ticker");
+    const dateColumn = findPriceHistoryColumn(row, "date");
+    const closeColumn = findPriceHistoryColumn(row, "close");
+    const ticker = tickerColumn
+      ? normalizeTicker(String(row[tickerColumn] ?? ""))
+      : "";
+    const date = dateColumn ? normalizeDate(row[dateColumn]) : "";
+    const close = closeColumn ? parseNumber(row[closeColumn]) : NaN;
+
+    if (!ticker && !date && !Number.isFinite(close)) return;
+    if (!ticker || !date || !Number.isFinite(close)) return;
+
+    prices.push({ ticker, date, close });
+  });
+
+  return prices;
+}
+
+function downloadInvestorOsTemplate() {
+  const workbook = XLSX.utils.book_new();
+  const portfolioSnapshot = XLSX.utils.json_to_sheet([
+    {
+      Ticker: "NVDA",
+      "Security Type": "Stock",
+      Shares: 10,
+      "Purchase Date": "2025-01-15",
+      "Purchase Price": 100,
+      "Current Price": 125,
+      "Value USD": 1250,
+      "Cost Basis": 1000,
+      "Ernings Prct": 25,
+      "Sold Date": "",
+      "Sold Price": "",
+      "Stop Loss Price": "",
+      Status: "Active",
+      "Final Earning": "",
+      "Active Earning": 250,
+    },
+    {
+      Ticker: "VOO",
+      "Security Type": "ETF",
+      Shares: 5,
+      "Purchase Date": "2024-06-03",
+      "Purchase Price": 450,
+      "Current Price": 500,
+      "Value USD": 2500,
+      "Cost Basis": 2250,
+      "Ernings Prct": 11.11,
+      "Sold Date": "",
+      "Sold Price": "",
+      "Stop Loss Price": "",
+      Status: "Active",
+      "Final Earning": "",
+      "Active Earning": 250,
+    },
+  ]);
+  const transactions = XLSX.utils.json_to_sheet([
+    {
+      date: "2025-01-15",
+      ticker: "NVDA",
+      action: "BUY",
+      quantity: 10,
+      price: 100,
+      currency: "USD",
+      fees: 0,
+      notes: "Optional",
+    },
+  ]);
+  const priceHistory = XLSX.utils.json_to_sheet([
+    { date: "2025-01-15", ticker: "NVDA", close: 100 },
+    { date: "2025-01-16", ticker: "NVDA", close: 102 },
+    { date: "2025-01-15", ticker: "VOO", close: 450 },
+    { date: "2025-01-16", ticker: "VOO", close: 452 },
+  ]);
+  const metadata = XLSX.utils.json_to_sheet([
+    {
+      ticker: "NVDA",
+      name: "NVIDIA Corp.",
+      sector: "Semiconductors",
+      currency: "USD",
+      exchange: "NASDAQ",
+    },
+  ]);
+  const instructions = XLSX.utils.aoa_to_sheet([
+    ["Investor OS data template"],
+    [""],
+    ["Use Portfolio Snapshot for your current holdings/status."],
+    ["Use Transactions if you prefer a ledger import."],
+    ["Use Price History for GitHub Pages/static mode, where the app cannot call a server API."],
+    ["You can ask ChatGPT to convert broker PDFs/statements into these sheets."],
+    ["Your uploaded workbook is parsed locally in your browser; this app does not upload it anywhere."],
+    [""],
+    ["Required Portfolio Snapshot columns: Ticker, Shares, Purchase Price."],
+    ["Recommended Portfolio Snapshot columns: Security Type, Purchase Date, Current Price, Value USD, Cost Basis, Status, Sold Date, Sold Price, Final Earning, Active Earning."],
+    ["Required Transactions columns: date, ticker, action, quantity, price."],
+    ["Valid transaction actions: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, FEE, TAX."],
+    ["Required Price History columns: date, ticker, close."],
+  ]);
+
+  XLSX.utils.book_append_sheet(workbook, portfolioSnapshot, "Portfolio Snapshot");
+  XLSX.utils.book_append_sheet(workbook, transactions, "Transactions");
+  XLSX.utils.book_append_sheet(workbook, priceHistory, "Price History");
+  XLSX.utils.book_append_sheet(workbook, metadata, "Security Metadata");
+  XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
+  XLSX.writeFile(workbook, "investor-os-template.xlsx");
+}
+
 function buildSnapshotRows(rows: RawRow[]) {
   const errors: string[] = [];
+  let skippedRows = 0;
   const importedAt = Date.now();
   const snapshotRows: PortfolioSnapshotRow[] = [];
 
@@ -234,8 +442,20 @@ function buildSnapshotRows(rows: RawRow[]) {
     const currentPriceColumn = findColumn(row, "currentPrice");
     const statusColumn = findColumn(row, "status");
 
+    const rawTicker = tickerColumn ? String(row[tickerColumn] ?? "").trim() : "";
+    const rawShares = sharesColumn ? String(row[sharesColumn] ?? "").trim() : "";
+    const rawPurchasePrice = purchasePriceColumn
+      ? String(row[purchasePriceColumn] ?? "").trim()
+      : "";
+    const isTemplateRow = !rawTicker && !rawShares && !rawPurchasePrice;
+
+    if (isTemplateRow) {
+      skippedRows += 1;
+      return;
+    }
+
     const ticker = tickerColumn
-      ? normalizeTicker(String(row[tickerColumn] ?? ""))
+      ? normalizeTicker(rawTicker)
       : "";
     const shares = sharesColumn ? parseNumber(row[sharesColumn]) : NaN;
     const purchasePrice = purchasePriceColumn
@@ -311,7 +531,7 @@ function buildSnapshotRows(rows: RawRow[]) {
     });
   });
 
-  return { snapshotRows, errors };
+  return { snapshotRows, errors, skippedRows };
 }
 
 export default function SyncSettingsPage() {
@@ -328,17 +548,52 @@ export default function SyncSettingsPage() {
   const [rows, setRows] = useState<RawRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [columnMap, setColumnMap] = useState<ColumnMap>({});
+  const [transactionPriceHistoryPreview, setTransactionPriceHistoryPreview] =
+    useState<PriceHistoryPoint[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [importMessage, setImportMessage] = useState("");
   const [snapshotText, setSnapshotText] = useState("");
   const [snapshotPreview, setSnapshotPreview] = useState<PortfolioSnapshotRow[]>([]);
+  const [snapshotPriceHistoryPreview, setSnapshotPriceHistoryPreview] =
+    useState<PriceHistoryPoint[]>([]);
   const [snapshotErrors, setSnapshotErrors] = useState<string[]>([]);
   const [snapshotMessage, setSnapshotMessage] = useState("");
   const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
+  const [isFetchingHistory, setIsFetchingHistory] = useState(false);
 
   const missingRequiredFields = useMemo(
     () => requiredFields.filter((field) => !columnMap[field]),
     [columnMap],
+  );
+  const rawPreviewHeaders = headers.slice(0, 10);
+  const {
+    sortedData: sortedSnapshotPreview,
+    sortConfig: snapshotPreviewSortConfig,
+    toggleSort: toggleSnapshotPreviewSort,
+  } = useSortableData(
+    snapshotPreview,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "status", getValue: (row) => row.status },
+      { id: "shares", getValue: (row) => row.shares },
+      { id: "purchasePrice", getValue: (row) => row.purchasePrice },
+      { id: "currentPrice", getValue: (row) => row.currentPrice },
+      { id: "valueUsd", getValue: (row) => row.valueUsd },
+      { id: "activeEarning", getValue: (row) => row.activeEarning ?? 0 },
+    ],
+    { id: "ticker", direction: "asc" },
+  );
+  const {
+    sortedData: sortedRawPreviewRows,
+    sortConfig: rawPreviewSortConfig,
+    toggleSort: toggleRawPreviewSort,
+  } = useSortableData(
+    rows,
+    rawPreviewHeaders.map((header) => ({
+      id: header,
+      getValue: (row) => String(row[header] ?? ""),
+    })),
+    { id: rawPreviewHeaders[0] ?? "", direction: "asc" },
   );
 
   async function handleFile(file: File) {
@@ -346,15 +601,62 @@ export default function SyncSettingsPage() {
     setErrors([]);
     setImportMessage("");
 
-    const parsedRows = await parseRowsFromFile(file);
+    const workbook = await parseWorkbookFromFile(file);
+    const transactionsSheet =
+      findSheetName(workbook, ["Transactions", "Transaction Ledger"]) ??
+      workbook.SheetNames[0];
+    const priceHistorySheet = findSheetName(workbook, [
+      "Price History",
+      "Prices",
+      "Daily Prices",
+    ]);
+    const parsedRows = sheetRows(workbook, transactionsSheet);
     const parsedHeaders = parsedRows[0] ? Object.keys(parsedRows[0]) : [];
 
     setRows(parsedRows);
     setHeaders(parsedHeaders);
     setColumnMap(autoMapColumns(parsedHeaders));
+    setTransactionPriceHistoryPreview(
+      priceHistorySheet ? buildPriceHistoryRows(sheetRows(workbook, priceHistorySheet)) : [],
+    );
   }
 
-  function importRows() {
+  async function fetchAndStoreDailyHistory(
+    tickers: string[],
+    from: string,
+    onError: (message: string) => void,
+  ) {
+    if (tickers.length === 0) return null;
+
+    setIsFetchingHistory(true);
+    const to = new Date().toISOString().slice(0, 10);
+
+    try {
+      const response = await fetch(
+        `/api/price-history?tickers=${encodeURIComponent(tickers.join(","))}&from=${from}&to=${to}`,
+      );
+
+      if (!response.ok) {
+        throw new Error("Price history fetch failed.");
+      }
+
+      const payload = (await response.json()) as {
+        prices: PriceHistoryPoint[];
+        errors?: Array<{ ticker: string; error: string }>;
+      };
+
+      setPriceHistory(payload.prices);
+      return payload;
+    } catch {
+      setPriceHistory([]);
+      onError("Saved locally, but daily price history could not be fetched. Try again later.");
+      return null;
+    } finally {
+      setIsFetchingHistory(false);
+    }
+  }
+
+  async function importRows() {
     setErrors([]);
     setImportMessage("");
 
@@ -372,10 +674,30 @@ export default function SyncSettingsPage() {
     }
 
     setTransactions(result.transactions);
-    setPriceHistory([]);
+    if (transactionPriceHistoryPreview.length > 0) {
+      setPriceHistory(transactionPriceHistoryPreview);
+      setImportMessage(
+        `Imported ${result.transactions.length} transactions from ${fileName} and loaded ${transactionPriceHistoryPreview.length.toLocaleString()} local price-history rows from the workbook.`,
+      );
+      return;
+    }
+
     setImportMessage(
-      `Imported ${result.transactions.length} transactions from ${fileName}. Dashboard values now use this local ledger.`,
+      `Imported ${result.transactions.length} transactions from ${fileName}. Fetching daily price history...`,
     );
+    const payload = await fetchAndStoreDailyHistory(
+      transactionTickers(result.transactions),
+      findEarliestPortfolioDate(result.transactions, []),
+      (message) => setImportMessage(message),
+    );
+
+    if (payload) {
+      setImportMessage(
+        payload.errors?.length
+          ? `Imported ${result.transactions.length} transactions and fetched ${payload.prices.length.toLocaleString()} daily prices. Missing: ${payload.errors.map((error) => error.ticker).join(", ")}.`
+          : `Imported ${result.transactions.length} transactions and fetched ${payload.prices.length.toLocaleString()} daily prices. Overview now uses market history.`,
+      );
+    }
   }
 
   function parseManualSnapshot(text: string) {
@@ -394,15 +716,27 @@ export default function SyncSettingsPage() {
     }
 
     setSnapshotPreview(result.snapshotRows);
+    setSnapshotPriceHistoryPreview([]);
     setSnapshotMessage(
-      `Parsed ${result.snapshotRows.length} portfolio status rows. Review and save when ready.`,
+      `Parsed ${result.snapshotRows.length} portfolio status rows${
+        result.skippedRows ? ` and skipped ${result.skippedRows} blank template rows` : ""
+      }. Review and save when ready.`,
     );
   }
 
   async function handleSnapshotFile(file: File) {
     setSnapshotErrors([]);
     setSnapshotMessage("");
-    const result = buildSnapshotRows(await parseRowsFromFile(file));
+    const workbook = await parseWorkbookFromFile(file);
+    const snapshotSheet =
+      findSheetName(workbook, ["Portfolio Snapshot", "Snapshot", "Holdings"]) ??
+      workbook.SheetNames[0];
+    const priceHistorySheet = findSheetName(workbook, [
+      "Price History",
+      "Prices",
+      "Daily Prices",
+    ]);
+    const result = buildSnapshotRows(sheetRows(workbook, snapshotSheet));
 
     if (result.errors.length > 0) {
       setSnapshotErrors(result.errors.slice(0, 8));
@@ -410,22 +744,63 @@ export default function SyncSettingsPage() {
     }
 
     setSnapshotPreview(result.snapshotRows);
+    setSnapshotPriceHistoryPreview(
+      priceHistorySheet ? buildPriceHistoryRows(sheetRows(workbook, priceHistorySheet)) : [],
+    );
     setSnapshotMessage(
-      `Parsed ${result.snapshotRows.length} portfolio status rows from ${file.name}.`,
+      `Parsed ${result.snapshotRows.length} portfolio status rows from ${file.name}${
+        result.skippedRows ? ` and skipped ${result.skippedRows} blank template rows` : ""
+      }${
+        priceHistorySheet ? " Price history sheet detected." : ""
+      }.`,
     );
   }
 
-  function saveSnapshot() {
+  async function saveSnapshot() {
     if (snapshotPreview.length === 0) {
       setSnapshotErrors(["Parse a snapshot before saving it."]);
       return;
     }
 
     setPortfolioSnapshot(snapshotPreview);
-    setPriceHistory([]);
+    if (snapshotPriceHistoryPreview.length > 0) {
+      const nextSnapshot = updateSnapshotWithLatestPrices(
+        snapshotPreview,
+        snapshotPriceHistoryPreview,
+      );
+
+      setPortfolioSnapshot(nextSnapshot);
+      setSnapshotPreview(nextSnapshot);
+      setPriceHistory(snapshotPriceHistoryPreview);
+      setSnapshotMessage(
+        `Saved ${nextSnapshot.length} status rows and loaded ${snapshotPriceHistoryPreview.length.toLocaleString()} local price-history rows from the workbook.`,
+      );
+      return;
+    }
+
     setSnapshotMessage(
-      `Saved ${snapshotPreview.length} status rows locally. Active rows now drive Overview, Holdings, and Sectors.`,
+      `Saved ${snapshotPreview.length} status rows locally. Fetching daily price history...`,
     );
+    const payload = await fetchAndStoreDailyHistory(
+      snapshotTickers(snapshotPreview),
+      findEarliestPortfolioDate([], snapshotPreview),
+      (message) => setSnapshotMessage(message),
+    );
+
+    if (payload) {
+      const nextSnapshot = updateSnapshotWithLatestPrices(
+        snapshotPreview,
+        payload.prices,
+      );
+
+      setPortfolioSnapshot(nextSnapshot);
+      setSnapshotPreview(nextSnapshot);
+      setSnapshotMessage(
+        payload.errors?.length
+          ? `Saved ${nextSnapshot.length} status rows and fetched ${payload.prices.length.toLocaleString()} daily prices. Missing: ${payload.errors.map((error) => error.ticker).join(", ")}.`
+          : `Saved ${nextSnapshot.length} status rows and fetched ${payload.prices.length.toLocaleString()} daily prices. Overview now uses market history.`,
+      );
+    }
   }
 
   async function updateSavedSnapshotPrices() {
@@ -462,15 +837,7 @@ export default function SyncSettingsPage() {
       prices: PriceHistoryPoint[];
       errors?: Array<{ ticker: string; error: string }>;
     };
-    const latestPrices = new Map<string, PriceHistoryPoint>();
-
-    payload.prices.forEach((point) => {
-      const ticker = normalizeTicker(point.ticker);
-      const existing = latestPrices.get(ticker);
-      if (!existing || point.date > existing.date) {
-        latestPrices.set(ticker, point);
-      }
-    });
+    const latestPrices = latestPricesByTicker(payload.prices);
 
     const nextSnapshot = portfolioSnapshot.map((row) => {
       if (row.status !== "Active") return row;
@@ -492,7 +859,7 @@ export default function SyncSettingsPage() {
 
     setPortfolioSnapshot(nextSnapshot);
     setSnapshotPreview(nextSnapshot);
-    setPriceHistory([]);
+    setPriceHistory(payload.prices);
     setIsUpdatingPrices(false);
     setSnapshotMessage(
       payload.errors?.length
@@ -508,6 +875,37 @@ export default function SyncSettingsPage() {
         title="Local file import"
         description="Upload a transaction ledger, or paste your current portfolio status table. Everything is stored locally in this browser."
       />
+
+      <Card className="mb-5">
+        <CardHeader>
+          <CardTitle>How to Add Private Data</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              Download the Investor OS workbook, fill it in Excel or Google
+              Sheets, then upload it here. You can also give broker PDFs or
+              statements to ChatGPT and ask it to convert them into this
+              workbook format.
+            </p>
+            <p>
+              For GitHub Pages/static hosting, include the optional Price
+              History sheet so Daily and Weekly performance can work without a
+              server API. The file is parsed locally in your browser and is not
+              uploaded to Investor OS.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="justify-start gap-2"
+            onClick={downloadInvestorOsTemplate}
+          >
+            <FileDown className="h-4 w-4" />
+            Download Investor OS workbook
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="mb-5 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
         <Card>
@@ -556,7 +954,7 @@ export default function SyncSettingsPage() {
                 Parse pasted status
               </Button>
               <Button onClick={saveSnapshot} disabled={snapshotPreview.length === 0}>
-                Save status locally
+                {isFetchingHistory ? "Saving + fetching..." : "Save status locally"}
               </Button>
               <Button
                 variant="outline"
@@ -572,7 +970,7 @@ export default function SyncSettingsPage() {
               <Button
                 variant="outline"
                 onClick={() => void updateSavedSnapshotPrices()}
-                disabled={portfolioSnapshot.length === 0 || isUpdatingPrices}
+                disabled={portfolioSnapshot.length === 0 || isUpdatingPrices || isFetchingHistory}
               >
                 {isUpdatingPrices ? "Updating prices..." : "Update current prices"}
               </Button>
@@ -602,17 +1000,17 @@ export default function SyncSettingsPage() {
               <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Shares</TableHead>
-                    <TableHead className="text-right">Purchase</TableHead>
-                    <TableHead className="text-right">Current</TableHead>
-                    <TableHead className="text-right">Value USD</TableHead>
-                    <TableHead className="text-right">Active P&L</TableHead>
+                    <SortableTableHead id="ticker" label="Ticker" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="status" label="Status" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="shares" label="Shares" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="purchasePrice" label="Purchase" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="currentPrice" label="Current" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="valueUsd" label="Value USD" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                    <SortableTableHead id="activeEarning" label="Active P&L" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {snapshotPreview.slice(0, 8).map((row) => (
+                  {sortedSnapshotPreview.slice(0, 8).map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="font-semibold">{row.ticker}</TableCell>
                       <TableCell>{row.status}</TableCell>
@@ -679,10 +1077,14 @@ export default function SyncSettingsPage() {
 
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={importRows}
-                disabled={rows.length === 0 || missingRequiredFields.length > 0}
+                onClick={() => void importRows()}
+                disabled={
+                  rows.length === 0 ||
+                  missingRequiredFields.length > 0 ||
+                  isFetchingHistory
+                }
               >
-                Import into localStorage
+                {isFetchingHistory ? "Importing + fetching..." : "Import into localStorage"}
               </Button>
               <Button variant="outline" onClick={loadDemoData}>
                 Load demo data
@@ -765,15 +1167,21 @@ export default function SyncSettingsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  {headers.slice(0, 10).map((header) => (
-                    <TableHead key={header}>{header}</TableHead>
+                  {rawPreviewHeaders.map((header) => (
+                    <SortableTableHead
+                      key={header}
+                      id={header}
+                      label={header}
+                      sortConfig={rawPreviewSortConfig}
+                      onSort={toggleRawPreviewSort}
+                    />
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.slice(0, 8).map((row, rowIndex) => (
+                {sortedRawPreviewRows.slice(0, 8).map((row, rowIndex) => (
                   <TableRow key={rowIndex}>
-                    {headers.slice(0, 10).map((header) => (
+                    {rawPreviewHeaders.map((header) => (
                       <TableCell key={header} className="max-w-48 truncate">
                         {String(row[header] ?? "")}
                       </TableCell>

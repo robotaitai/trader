@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +15,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -65,6 +68,22 @@ export function DecisionJournalView() {
   const selectedHolding = holdingByTicker.get(ticker.toUpperCase());
   const openEntries = entries.filter((entry) => entry.status === "Open");
   const reviewedEntries = entries.filter((entry) => entry.status === "Reviewed");
+  const {
+    sortedData: sortedEntries,
+    sortConfig: entrySortConfig,
+    toggleSort: toggleEntrySort,
+  } = useSortableData(
+    entries,
+    [
+      { id: "date", getValue: (row) => row.date },
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "decision", getValue: (row) => row.decision },
+      { id: "thesis", getValue: (row) => row.thesis },
+      { id: "confidence", getValue: (row) => row.confidence },
+      { id: "status", getValue: (row) => row.status },
+    ],
+    { id: "date", direction: "desc" },
+  );
 
   function saveEntry() {
     const normalizedTicker = ticker.trim().toUpperCase();
@@ -236,17 +255,19 @@ export function DecisionJournalView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Decision</TableHead>
-                  <TableHead>Thesis</TableHead>
-                  <TableHead className="text-right">Confidence</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <SortableTableHead id="date" label="Date" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <SortableTableHead id="decision" label="Decision" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <SortableTableHead id="thesis" label="Thesis" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <SortableTableHead id="confidence" label="Confidence" align="right" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <SortableTableHead id="status" label="Status" sortConfig={entrySortConfig} onSort={toggleEntrySort} />
+                  <th className="h-9 px-2 text-right align-middle text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+                    Actions
+                  </th>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {entries.map((entry) => (
+                {sortedEntries.map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell>{entry.date}</TableCell>
                     <TableCell className="font-semibold">{entry.ticker}</TableCell>

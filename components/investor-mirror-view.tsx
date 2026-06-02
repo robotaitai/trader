@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { InsightList } from "@/components/insight-list";
 import { PageHeader } from "@/components/page-header";
+import {
+  SortableTableHead,
+  useSortableData,
+} from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -176,6 +179,63 @@ export function InvestorMirrorView() {
         : "No closed positions captured",
     },
   ];
+  const {
+    sortedData: sortedChecklistRows,
+    sortConfig: checklistSortConfig,
+    toggleSort: toggleChecklistSort,
+  } = useSortableData(
+    checklistRows,
+    [
+      { id: "item", getValue: (row) => row.item },
+      { id: "status", getValue: (row) => (row.status ? "Covered" : "Needs work") },
+      { id: "detail", getValue: (row) => row.detail },
+    ],
+    { id: "item", direction: "asc" },
+  );
+  const {
+    sortedData: sortedReviewQueue,
+    sortConfig: reviewQueueSortConfig,
+    toggleSort: toggleReviewQueueSort,
+  } = useSortableData(
+    reviewQueue,
+    [
+      { id: "date", getValue: (row) => row.date },
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "decision", getValue: (row) => row.decision },
+      { id: "weight", getValue: (row) => row.holding?.weightPct ?? 0 },
+      { id: "confidence", getValue: (row) => row.confidence },
+    ],
+    { id: "weight", direction: "desc" },
+  );
+  const {
+    sortedData: sortedClosedPositions,
+    sortConfig: closedSortConfig,
+    toggleSort: toggleClosedSort,
+  } = useSortableData(
+    closedPositions,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "realizedPnl", getValue: (row) => row.realizedPnl },
+      { id: "realizedPnlPct", getValue: (row) => row.realizedPnlPct },
+      { id: "soldDate", getValue: (row) => row.soldDate },
+    ],
+    { id: "realizedPnl", direction: "desc" },
+  );
+  const {
+    sortedData: sortedUnjournaledMaterialPositions,
+    sortConfig: unjournaledSortConfig,
+    toggleSort: toggleUnjournaledSort,
+  } = useSortableData(
+    unjournaledMaterialPositions,
+    [
+      { id: "ticker", getValue: (row) => row.ticker },
+      { id: "sector", getValue: (row) => row.sector },
+      { id: "weightPct", getValue: (row) => row.weightPct },
+      { id: "unrealizedPnl", getValue: (row) => row.unrealizedPnl },
+      { id: "unrealizedPnlPct", getValue: (row) => row.unrealizedPnlPct },
+    ],
+    { id: "weightPct", direction: "desc" },
+  );
 
   const insights = useMemo<LocalInsight[]>(() => {
     const nextInsights: LocalInsight[] = [];
@@ -281,13 +341,13 @@ export function InvestorMirrorView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Check</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Read</TableHead>
+                  <SortableTableHead id="item" label="Check" sortConfig={checklistSortConfig} onSort={toggleChecklistSort} />
+                  <SortableTableHead id="status" label="Status" sortConfig={checklistSortConfig} onSort={toggleChecklistSort} />
+                  <SortableTableHead id="detail" label="Read" sortConfig={checklistSortConfig} onSort={toggleChecklistSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {checklistRows.map((row) => (
+                {sortedChecklistRows.map((row) => (
                   <TableRow key={row.item}>
                     <TableCell className="font-medium">{row.item}</TableCell>
                     <TableCell>
@@ -323,15 +383,15 @@ export function InvestorMirrorView() {
               <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead>Decision</TableHead>
-                    <TableHead className="text-right">Weight</TableHead>
-                    <TableHead className="text-right">Confidence</TableHead>
+                    <SortableTableHead id="date" label="Date" sortConfig={reviewQueueSortConfig} onSort={toggleReviewQueueSort} />
+                    <SortableTableHead id="ticker" label="Ticker" sortConfig={reviewQueueSortConfig} onSort={toggleReviewQueueSort} />
+                    <SortableTableHead id="decision" label="Decision" sortConfig={reviewQueueSortConfig} onSort={toggleReviewQueueSort} />
+                    <SortableTableHead id="weight" label="Weight" align="right" sortConfig={reviewQueueSortConfig} onSort={toggleReviewQueueSort} />
+                    <SortableTableHead id="confidence" label="Confidence" align="right" sortConfig={reviewQueueSortConfig} onSort={toggleReviewQueueSort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {reviewQueue.slice(0, 8).map((entry) => (
+                  {sortedReviewQueue.slice(0, 8).map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell>{entry.date}</TableCell>
                       <TableCell className="font-semibold">{entry.ticker}</TableCell>
@@ -364,14 +424,14 @@ export function InvestorMirrorView() {
               <Table className="text-xs">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead className="text-right">P&L</TableHead>
-                    <TableHead className="text-right">Return</TableHead>
-                    <TableHead>Closed</TableHead>
+                    <SortableTableHead id="ticker" label="Ticker" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                    <SortableTableHead id="realizedPnl" label="P&L" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                    <SortableTableHead id="realizedPnlPct" label="Return" align="right" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
+                    <SortableTableHead id="soldDate" label="Closed" sortConfig={closedSortConfig} onSort={toggleClosedSort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {closedPositions.slice(0, 8).map((position) => (
+                  {sortedClosedPositions.slice(0, 8).map((position) => (
                     <TableRow key={`${position.ticker}-${position.soldDate ?? "closed"}`}>
                       <TableCell className="font-semibold">{position.ticker}</TableCell>
                       <TableCell className={`text-right tabular-nums ${pnlClass(position.realizedPnl)}`}>
@@ -404,15 +464,15 @@ export function InvestorMirrorView() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Sector</TableHead>
-                  <TableHead className="text-right">Weight</TableHead>
-                  <TableHead className="text-right">P&L</TableHead>
-                  <TableHead className="text-right">Return</TableHead>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={unjournaledSortConfig} onSort={toggleUnjournaledSort} />
+                  <SortableTableHead id="sector" label="Sector" sortConfig={unjournaledSortConfig} onSort={toggleUnjournaledSort} />
+                  <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={unjournaledSortConfig} onSort={toggleUnjournaledSort} />
+                  <SortableTableHead id="unrealizedPnl" label="P&L" align="right" sortConfig={unjournaledSortConfig} onSort={toggleUnjournaledSort} />
+                  <SortableTableHead id="unrealizedPnlPct" label="Return" align="right" sortConfig={unjournaledSortConfig} onSort={toggleUnjournaledSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {unjournaledMaterialPositions.map((holding) => (
+                {sortedUnjournaledMaterialPositions.map((holding) => (
                   <TableRow key={holding.ticker}>
                     <TableCell className="font-semibold">{holding.ticker}</TableCell>
                     <TableCell>{holding.sector}</TableCell>

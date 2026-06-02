@@ -84,17 +84,17 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
       },
       {
         accessorKey: "name",
-        header: "Name",
+        header: ({ column }) => <SortHeader label="Name" column={column} />,
         cell: ({ row }) => <div className="max-w-36 truncate">{row.original.name}</div>,
       },
       {
         accessorKey: "sector",
-        header: "Sector",
+        header: ({ column }) => <SortHeader label="Sector" column={column} />,
         cell: ({ row }) => <div className="max-w-28 truncate">{row.original.sector}</div>,
       },
       {
         accessorKey: "quantity",
-        header: "Qty",
+        header: ({ column }) => <SortHeader label="Qty" column={column} />,
         cell: ({ row }) => (
           <div className="text-right tabular-nums">
             {formatNumber(row.original.quantity, 4)}
@@ -103,7 +103,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
       },
       {
         accessorKey: "avgCost",
-        header: "Avg",
+        header: ({ column }) => <SortHeader label="Avg" column={column} />,
         cell: ({ row }) => (
           <div className="text-right tabular-nums">
             {formatCurrencyPrecise(row.original.avgCost, row.original.currency)}
@@ -112,7 +112,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
       },
       {
         accessorKey: "currentPrice",
-        header: "Price",
+        header: ({ column }) => <SortHeader label="Price" column={column} />,
         cell: ({ row }) => (
           <div className="text-right tabular-nums">
             {formatCurrencyPrecise(row.original.currentPrice, row.original.currency)}
@@ -139,7 +139,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
       },
       {
         accessorKey: "unrealizedPnlPct",
-        header: "Unrlzd %",
+        header: ({ column }) => <SortHeader label="Unrlzd %" column={column} />,
         cell: ({ row }) => (
           <div className={`text-right tabular-nums ${pnlClass(row.original.unrealizedPnlPct)}`}>
             {formatPct(row.original.unrealizedPnlPct)}

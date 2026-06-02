@@ -33,11 +33,12 @@ winners/losers. Ticker rows include an info action that opens a local
 explanation panel for the symbol, name, sector, role, quantity, cost basis,
 current price, market value, unrealized P&L, and activity dates.
 The value-over-time chart uses canonical monthly dates, range controls
-(`6M`, `1Y`, `3Y`, `All`), sparse year-aware axis labels, full month/year
-tooltips, and a range change readout.
+(`6M`, `1Y`, `3Y`, `All`), daily/weekly/monthly/quarterly/yearly aggregation
+when daily price history exists, value/return/candle views, legends, full
+period labels in tooltips, and range move/gain-loss/net-flow readouts.
 
 `/holdings` shows a TanStack Table holdings ledger with global search, sector
-filtering, and sorting by ticker, market value, P&L, and weight.
+filtering, and sorting across all displayed data columns.
 
 `/performance-lab` shows weighted return, scenario value, best/worst
 contributors, monthly flow-adjusted performance, a monthly return ledger, a
@@ -78,6 +79,10 @@ risk, confidence, open/reviewed status, and delete/review actions.
 
 Saved current portfolio snapshots can refresh active current prices from the
 local Yahoo-backed price-history route.
+
+Tables across Overview, Performance Lab, Exposure Map, Sectors, Investor
+Mirror, Decision Journal, and Sync Settings expose sortable headers for their
+displayed data fields. Non-data action/info controls are intentionally static.
 
 ## Phase Boundaries
 

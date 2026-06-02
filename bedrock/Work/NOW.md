@@ -60,6 +60,26 @@ a clearer Sectors page that splits economic stock sectors from ETF/fund sleeves.
 Unclassified active holdings are explicitly surfaced instead of silently
 polluting allocation quality.
 
+Table sorting has been hardened across the app: Holdings sorts every displayed
+data column through TanStack Table, and the remaining analytics/import tables
+use a shared sortable header helper. Action/info-only columns remain static.
+
+Overview's performance chart now has value, flow-adjusted return, and candle
+views with daily/weekly/monthly/quarterly/yearly aggregation, richer legends,
+cleaner axes, and range-level gain/loss/net-flow summaries. Daily and weekly
+views require fetched daily price history; otherwise the UI falls back to
+monthly-or-higher data.
+
+Sync Settings now fetches daily price history immediately after transaction
+imports and current snapshot saves. This keeps Overview from staying in
+estimated mode after upload.
+
+GitHub Pages publishing is configured through `.github/workflows/pages.yml`.
+Static export uses `/trader` as the base path and removes server routes only in
+the Actions workspace. README documents the live Pages URL, the local privacy
+model, workbook instructions, a ChatGPT conversion prompt, and the price-history
+sheet requirement for fully static daily/weekly performance.
+
 ## Next recommended actions
 
 1. Manually run the app and exercise both import flows in `/sync-settings` with
