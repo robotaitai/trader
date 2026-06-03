@@ -20,6 +20,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { fetchDailyCloses } from "@/lib/market-data";
+import { applyLatestCloses } from "@/lib/performance-metrics";
+import { downloadProcessedData } from "@/lib/portfolio-bundle";
 import { normalizeTicker } from "@/lib/security-classification";
 import { usePortfolioData } from "@/lib/storage";
 import type {
@@ -289,45 +292,6 @@ function findEarliestPortfolioDate(
     .sort((a, b) => a.getTime() - b.getTime());
 
   return (dates[0] ?? new Date(threeYearsAgo())).toISOString().slice(0, 10);
-}
-
-function latestPricesByTicker(prices: PriceHistoryPoint[]) {
-  const latestPrices = new Map<string, PriceHistoryPoint>();
-
-  prices.forEach((point) => {
-    const ticker = normalizeTicker(point.ticker);
-    const existing = latestPrices.get(ticker);
-    if (!existing || point.date > existing.date) {
-      latestPrices.set(ticker, point);
-    }
-  });
-
-  return latestPrices;
-}
-
-function updateSnapshotWithLatestPrices(
-  snapshotRows: PortfolioSnapshotRow[],
-  prices: PriceHistoryPoint[],
-) {
-  const latestPrices = latestPricesByTicker(prices);
-
-  return snapshotRows.map((row) => {
-    if (row.status !== "Active") return row;
-
-    const latest = latestPrices.get(normalizeTicker(row.ticker));
-    if (!latest) return row;
-
-    const valueUsd = row.shares * latest.close;
-    const activeEarning = valueUsd - row.costBasis;
-
-    return {
-      ...row,
-      currentPrice: latest.close,
-      valueUsd,
-      activeEarning,
-      earningsPct: row.costBasis ? (activeEarning / row.costBasis) * 100 : 0,
-    };
-  });
 }
 
 function buildPriceHistoryRows(rows: RawRow[]) {
@@ -612,24 +576,22 @@ export default function SyncSettingsPage() {
     const to = new Date().toISOString().slice(0, 10);
 
     try {
-      const response = await fetch(
-        `/api/price-history?tickers=${encodeURIComponent(tickers.join(","))}&from=${from}&to=${to}`,
-      );
-
-      if (!response.ok) {
-        throw new Error("Price history fetch failed.");
+      // Fetched in the browser from Yahoo Finance (only ticker symbols are
+      // sent). Works on the static GitHub Pages site with no server.
+      const { prices, failed } = await fetchDailyCloses(tickers, from, to);
+      if (prices.length === 0) {
+        throw new Error("No prices returned.");
       }
-
-      const payload = (await response.json()) as {
-        prices: PriceHistoryPoint[];
-        errors?: Array<{ ticker: string; error: string }>;
+      setPriceHistory(prices);
+      return {
+        prices,
+        errors: failed.map((ticker) => ({ ticker, error: "not found" })),
       };
-
-      setPriceHistory(payload.prices);
-      return payload;
     } catch {
       setPriceHistory([]);
-      onError("Saved locally, but daily price history could not be fetched. Try again later.");
+      onError(
+        "Saved locally, but live prices could not be fetched right now. You can retry, or add a Current Price column.",
+      );
       return null;
     } finally {
       setIsFetchingHistory(false);
@@ -742,22 +704,46 @@ export default function SyncSettingsPage() {
       return;
     }
 
-    const priceHistory = priceHistorySheet
+    const filePriceHistory = priceHistorySheet
       ? buildPriceHistoryRows(sheetRows(workbook, priceHistorySheet))
       : [];
-    const savedRows =
-      priceHistory.length > 0
-        ? updateSnapshotWithLatestPrices(result.snapshotRows, priceHistory)
+    let savedRows =
+      filePriceHistory.length > 0
+        ? applyLatestCloses(result.snapshotRows, filePriceHistory)
         : result.snapshotRows;
 
     setPortfolioSnapshot(savedRows);
     setSnapshotPreview(savedRows);
-    if (priceHistory.length > 0) setPriceHistory(priceHistory);
+    if (filePriceHistory.length > 0) setPriceHistory(filePriceHistory);
 
     const count = savedRows.length;
     setSnapshotMessage(
-      `Imported ${count} holding${count === 1 ? "" : "s"} from "${file.name}" and saved them on this device.`,
+      `Imported ${count} holding${count === 1 ? "" : "s"} from "${file.name}". Fetching live daily prices...`,
     );
+
+    // Auto-process: fetch live daily history so the dashboard's daily/weekly
+    // views and current prices light up immediately. Failures are non-fatal —
+    // the holdings are already saved above.
+    if (filePriceHistory.length === 0) {
+      const tickers = savedRows
+        .filter((row) => row.status === "Active")
+        .map((row) => row.ticker);
+      const from = findEarliestPortfolioDate([], savedRows);
+      const fetched = await fetchAndStoreDailyHistory(tickers, from, (message) =>
+        setSnapshotMessage(`Imported ${count} holdings. ${message}`),
+      );
+      if (fetched && fetched.prices.length > 0) {
+        savedRows = applyLatestCloses(savedRows, fetched.prices);
+        setPortfolioSnapshot(savedRows);
+        setSnapshotPreview(savedRows);
+        const missing = fetched.errors.map((error) => error.ticker);
+        setSnapshotMessage(
+          missing.length
+            ? `Imported ${count} holdings and fetched live prices (couldn't find: ${missing.join(", ")}).`
+            : `Imported ${count} holdings and fetched live daily prices.`,
+        );
+      }
+    }
   }
 
   async function saveSnapshot() {
@@ -768,7 +754,7 @@ export default function SyncSettingsPage() {
 
     setPortfolioSnapshot(snapshotPreview);
     if (snapshotPriceHistoryPreview.length > 0) {
-      const nextSnapshot = updateSnapshotWithLatestPrices(
+      const nextSnapshot = applyLatestCloses(
         snapshotPreview,
         snapshotPriceHistoryPreview,
       );
@@ -792,7 +778,7 @@ export default function SyncSettingsPage() {
     );
 
     if (payload) {
-      const nextSnapshot = updateSnapshotWithLatestPrices(
+      const nextSnapshot = applyLatestCloses(
         snapshotPreview,
         payload.prices,
       );
@@ -827,48 +813,31 @@ export default function SyncSettingsPage() {
 
     setIsUpdatingPrices(true);
     const to = new Date().toISOString().slice(0, 10);
-    const response = await fetch(
-      `/api/price-history?tickers=${encodeURIComponent(activeTickers.join(","))}&from=${twoWeeksAgo()}&to=${to}`,
+    const { prices, failed } = await fetchDailyCloses(
+      activeTickers,
+      twoWeeksAgo(),
+      to,
     );
 
-    if (!response.ok) {
+    if (prices.length === 0) {
       setIsUpdatingPrices(false);
-      setSnapshotErrors(["Could not update prices. Try again later."]);
+      setSnapshotErrors([
+        "Could not fetch live prices right now. Please try again in a moment.",
+      ]);
       return;
     }
 
-    const payload = (await response.json()) as {
-      prices: PriceHistoryPoint[];
-      errors?: Array<{ ticker: string; error: string }>;
-    };
-    const latestPrices = latestPricesByTicker(payload.prices);
-
-    const nextSnapshot = portfolioSnapshot.map((row) => {
-      if (row.status !== "Active") return row;
-
-      const latest = latestPrices.get(normalizeTicker(row.ticker));
-      if (!latest) return row;
-
-      const valueUsd = row.shares * latest.close;
-      const activeEarning = valueUsd - row.costBasis;
-
-      return {
-        ...row,
-        currentPrice: latest.close,
-        valueUsd,
-        activeEarning,
-        earningsPct: row.costBasis ? (activeEarning / row.costBasis) * 100 : 0,
-      };
-    });
+    const nextSnapshot = applyLatestCloses(portfolioSnapshot, prices);
+    const updatedCount = activeTickers.length - failed.length;
 
     setPortfolioSnapshot(nextSnapshot);
     setSnapshotPreview(nextSnapshot);
-    setPriceHistory(payload.prices);
+    setPriceHistory(prices);
     setIsUpdatingPrices(false);
     setSnapshotMessage(
-      payload.errors?.length
-        ? `Updated prices for ${latestPrices.size} tickers. Missing: ${payload.errors.map((error) => error.ticker).join(", ")}.`
-        : `Updated current prices for ${latestPrices.size} active tickers and recalculated local snapshot values.`,
+      failed.length
+        ? `Updated prices for ${updatedCount} tickers. Could not find: ${failed.join(", ")}.`
+        : `Updated live prices for ${updatedCount} active tickers and recalculated values.`,
     );
   }
 
@@ -986,18 +955,35 @@ export default function SyncSettingsPage() {
           ) : null}
 
           {portfolioSnapshot.length > 0 ? (
-            <div className="flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                ✅ {portfolioSnapshot.length} holding
-                {portfolioSnapshot.length === 1 ? "" : "s"} saved on this device.
+            <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  ✅ {snapshotMessage ||
+                    `${portfolioSnapshot.length} holding${portfolioSnapshot.length === 1 ? "" : "s"} saved on this device.`}
+                </div>
+                <Link
+                  href="/overview"
+                  className={buttonVariants({ className: "gap-2 shrink-0" })}
+                >
+                  View your dashboard
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
               </div>
-              <Link
-                href="/overview"
-                className={buttonVariants({ className: "gap-2" })}
-              >
-                View your dashboard
-                <ArrowRight className="h-4 w-4" />
-              </Link>
+              <div className="flex flex-col gap-2 border-t border-emerald-200 pt-3 text-emerald-800 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs leading-5">
+                  🔒 Nothing is stored on any server — this data lives only in
+                  this browser. Save a copy so you can reload it instantly next
+                  time (and on your other devices).
+                </div>
+                <Button
+                  variant="outline"
+                  className="shrink-0 gap-2 border-emerald-300 bg-white"
+                  onClick={() => downloadProcessedData()}
+                >
+                  <FileDown className="h-4 w-4" />
+                  Download processed data
+                </Button>
+              </div>
             </div>
           ) : snapshotMessage ? (
             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">

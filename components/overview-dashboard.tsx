@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Info, X } from "lucide-react";
+import { Download, Info, RefreshCw, X } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -33,7 +33,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { fetchDailyCloses } from "@/lib/market-data";
 import { mockHistoricalValues } from "@/lib/mock-data";
+import {
+  applyLatestCloses,
+  computeHoldingTrends,
+  portfolioDayChange,
+  rangeReturnPct,
+  type HoldingTrend,
+} from "@/lib/performance-metrics";
+import { downloadProcessedData } from "@/lib/portfolio-bundle";
 import {
   calculateContributionRows,
   calculateMonthlyPerformance,
@@ -601,6 +610,41 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   );
 }
 
+function Sparkline({ data }: { data: number[] }) {
+  if (data.length < 2) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const width = 64;
+  const height = 20;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data
+    .map(
+      (value, index) =>
+        `${(index / (data.length - 1)) * width},${height - ((value - min) / range) * height}`,
+    )
+    .join(" ");
+  const up = data[data.length - 1] >= data[0];
+  return (
+    <svg width={width} height={height} className="inline-block align-middle">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={up ? "#047857" : "#dc2626"}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function pctCell(value: number | null | undefined) {
+  if (value == null) return <span className="text-muted-foreground">—</span>;
+  return <span className={pnlClass(value)}>{formatPct(value)}</span>;
+}
+
 function TickerInfoPanel({
   holding,
   onClose,
@@ -720,6 +764,8 @@ export function OverviewDashboard() {
     portfolioSnapshot,
     priceHistory,
     sectorExposure,
+    setPortfolioSnapshot,
+    setPriceHistory,
     summary,
     topWinnersLosers,
     transactions,
@@ -730,6 +776,80 @@ export function OverviewDashboard() {
     useState<PerformanceGranularity>("M");
   const [performanceView, setPerformanceView] =
     useState<PerformanceView>("value");
+  const [benchmarkSeries, setBenchmarkSeries] = useState<
+    { date: string; close: number }[]
+  >([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState("");
+
+  const trends = useMemo(
+    () => computeHoldingTrends(priceHistory),
+    [priceHistory],
+  );
+  const dayChange = useMemo(
+    () => portfolioDayChange(holdings, trends),
+    [holdings, trends],
+  );
+  const movers = useMemo(() => {
+    const withDay = holdings
+      .map((holding) => ({
+        holding,
+        trend: trends.get(normalizeTicker(holding.ticker)),
+      }))
+      .filter(
+        (row): row is { holding: Holding; trend: HoldingTrend } =>
+          row.trend != null && row.trend.dayChangePct != null,
+      )
+      .sort(
+        (a, b) => (b.trend.dayChangePct ?? 0) - (a.trend.dayChangePct ?? 0),
+      );
+    return {
+      gainers: withDay.filter((row) => (row.trend.dayChangePct ?? 0) > 0).slice(0, 4),
+      losers: withDay
+        .filter((row) => (row.trend.dayChangePct ?? 0) < 0)
+        .slice(-4)
+        .reverse(),
+    };
+  }, [holdings, trends]);
+  const earliestDate = useMemo(() => {
+    const dates = holdings
+      .map((holding) => holding.firstBuyDate)
+      .filter(Boolean)
+      .sort();
+    if (dates[0]) return dates[0];
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 1);
+    return date.toISOString().slice(0, 10);
+  }, [holdings]);
+
+  async function refreshPrices() {
+    const tickers = holdings.map((holding) => holding.ticker).filter(Boolean);
+    if (tickers.length === 0) return;
+    setIsRefreshing(true);
+    setRefreshMessage("Fetching live prices...");
+    const { prices, failed } = await fetchDailyCloses(
+      [...tickers, "SPY"],
+      earliestDate,
+    );
+    const spy = prices.filter((point) => normalizeTicker(point.ticker) === "SPY");
+    const holdingPrices = prices.filter(
+      (point) => normalizeTicker(point.ticker) !== "SPY",
+    );
+    if (holdingPrices.length > 0) {
+      setPriceHistory(holdingPrices);
+      setPortfolioSnapshot(applyLatestCloses(portfolioSnapshot, holdingPrices));
+    }
+    setBenchmarkSeries(spy.map((point) => ({ date: point.date, close: point.close })));
+    setIsRefreshing(false);
+    const missing = failed.filter((ticker) => ticker !== "SPY");
+    setRefreshMessage(
+      holdingPrices.length === 0
+        ? "Could not fetch live prices right now. Try again in a moment."
+        : missing.length
+          ? `Prices updated. Couldn't find: ${missing.join(", ")}.`
+          : `Prices updated ${new Date().toLocaleTimeString()}.`,
+    );
+  }
 
   const monthlyPerformance = useMemo(
     () =>
@@ -829,6 +949,13 @@ export function OverviewDashboard() {
     (sum, point) => sum + point.gainLoss,
     0,
   );
+  const benchmarkCutoff = visiblePerformancePeriods[0]?.sortDate;
+  const benchmarkReturnPct = useMemo(
+    () => rangeReturnPct(benchmarkSeries, benchmarkCutoff),
+    [benchmarkSeries, benchmarkCutoff],
+  );
+  const alphaPct =
+    benchmarkReturnPct != null ? valueChangePct - benchmarkReturnPct : null;
   const contributionRows = useMemo(
     () => calculateContributionRows(holdings),
     [holdings],
@@ -857,6 +984,45 @@ export function OverviewDashboard() {
   const topThreeWeight = holdings
     .slice(0, 3)
     .reduce((sum, holding) => sum + holding.weightPct, 0);
+  // Stop-loss proximity (uses the optional stop-loss field when present).
+  const stopLossAlerts = useMemo(
+    () =>
+      portfolioSnapshot
+        .filter(
+          (row) =>
+            row.status === "Active" &&
+            typeof row.stopLossPrice === "number" &&
+            row.stopLossPrice > 0 &&
+            row.currentPrice > 0,
+        )
+        .map((row) => ({
+          ticker: row.ticker,
+          currentPrice: row.currentPrice,
+          stopLossPrice: row.stopLossPrice as number,
+          distancePct:
+            ((row.currentPrice - (row.stopLossPrice as number)) /
+              row.currentPrice) *
+            100,
+        }))
+        .filter((row) => row.distancePct <= 12)
+        .sort((a, b) => a.distancePct - b.distancePct),
+    [portfolioSnapshot],
+  );
+  // Rebalancing hints: positions meaningfully above an equal-weight target.
+  const rebalanceHints = useMemo(() => {
+    if (holdings.length === 0) return [];
+    const target = 100 / holdings.length;
+    return holdings
+      .map((holding) => ({
+        ticker: holding.ticker,
+        weightPct: holding.weightPct,
+        drift: holding.weightPct - target,
+        target,
+      }))
+      .filter((row) => row.weightPct >= 25 || row.drift >= target)
+      .sort((a, b) => b.drift - a.drift)
+      .slice(0, 4);
+  }, [holdings]);
   const closedRealizedPnl = closedPositions.reduce(
     (sum, position) => sum + position.realizedPnl,
     0,
@@ -894,16 +1060,70 @@ export function OverviewDashboard() {
         description="A local-first view of value, return, exposure, concentration, and the positions driving the result."
       />
 
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <Badge variant="outline">{sourceLabel}</Badge>
         <Badge variant="outline">{historyLabel}</Badge>
         <Badge variant="outline">{holdings.length} active positions</Badge>
         {closedPositions.length ? (
           <Badge variant="outline">{closedPositions.length} closed positions</Badge>
         ) : null}
+        {holdings.length ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto gap-2"
+            onClick={() => void refreshPrices()}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+            {isRefreshing ? "Refreshing..." : "Refresh prices"}
+          </Button>
+        ) : null}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {holdings.length ? (
+        <div className="mb-5 flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            🔒 This data is not stored on any server — it lives only in this
+            browser. Download a copy so you can reload it instantly next time and
+            on your other devices.
+            {refreshMessage ? (
+              <span className="ml-1 text-amber-700">{refreshMessage}</span>
+            ) : null}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-2 border-amber-300 bg-white"
+            onClick={() => downloadProcessedData()}
+          >
+            <Download className="h-4 w-4" />
+            Download my data
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <MetricCard
+          label="Today"
+          value={
+            dayChange.hasData
+              ? `${dayChange.change >= 0 ? "+" : ""}${formatCurrency(dayChange.change)}`
+              : "—"
+          }
+          detail={
+            dayChange.hasData
+              ? `${formatPct(dayChange.pct)} since prev close`
+              : "Refresh prices for daily moves"
+          }
+          tone={
+            dayChange.hasData
+              ? dayChange.change >= 0
+                ? "positive"
+                : "negative"
+              : undefined
+          }
+        />
         <MetricCard
           label="Portfolio Value"
           value={formatCurrency(summary.portfolioValue)}
@@ -1208,6 +1428,154 @@ export function OverviewDashboard() {
         </Card>
       </div>
 
+      <div className="mt-5 grid gap-5 lg:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Movers Today</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {movers.gainers.length || movers.losers.length ? (
+              <>
+                {movers.gainers.map((row) => (
+                  <div
+                    key={`up-${row.holding.ticker}`}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{row.holding.ticker}</span>
+                      <Sparkline data={row.trend.spark} />
+                    </div>
+                    <span className={pnlClass(row.trend.dayChangePct ?? 0)}>
+                      {formatPct(row.trend.dayChangePct ?? 0)}
+                    </span>
+                  </div>
+                ))}
+                {movers.losers.map((row) => (
+                  <div
+                    key={`down-${row.holding.ticker}`}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{row.holding.ticker}</span>
+                      <Sparkline data={row.trend.spark} />
+                    </div>
+                    <span className={pnlClass(row.trend.dayChangePct ?? 0)}>
+                      {formatPct(row.trend.dayChangePct ?? 0)}
+                    </span>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <EmptyState>
+                Refresh prices to see today&apos;s biggest movers.
+              </EmptyState>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>vs S&P 500</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {benchmarkReturnPct != null ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">
+                      Your return ({valueRange})
+                    </div>
+                    <div className={`mt-1 text-lg font-semibold ${pnlClass(valueChangePct)}`}>
+                      {formatPct(valueChangePct)}
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">S&P 500 (SPY)</div>
+                    <div className={`mt-1 text-lg font-semibold ${pnlClass(benchmarkReturnPct)}`}>
+                      {formatPct(benchmarkReturnPct)}
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-md border bg-gray-50 p-3 text-sm">
+                  <span className="text-muted-foreground">Alpha vs benchmark: </span>
+                  <span className={`font-semibold ${pnlClass(alphaPct ?? 0)}`}>
+                    {alphaPct != null
+                      ? `${alphaPct >= 0 ? "+" : ""}${alphaPct.toFixed(2)}%`
+                      : "—"}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <EmptyState>
+                Refresh prices to compare your return against the S&amp;P 500
+                over the selected range.
+              </EmptyState>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Stop-loss &amp; Rebalance</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {stopLossAlerts.length ? (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase text-muted-foreground">
+                  Stop-loss proximity
+                </div>
+                {stopLossAlerts.map((alert) => (
+                  <div
+                    key={alert.ticker}
+                    className="flex items-center justify-between gap-2 rounded-md border p-2"
+                  >
+                    <span className="font-medium">{alert.ticker}</span>
+                    <span
+                      className={
+                        alert.distancePct <= 0
+                          ? "text-red-700"
+                          : "text-amber-700"
+                      }
+                    >
+                      {alert.distancePct <= 0
+                        ? "below stop"
+                        : `${alert.distancePct.toFixed(1)}% to stop`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {rebalanceHints.length ? (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase text-muted-foreground">
+                  Overweight vs equal-weight
+                </div>
+                {rebalanceHints.map((hint) => (
+                  <div
+                    key={hint.ticker}
+                    className="flex items-center justify-between gap-2 rounded-md border p-2"
+                  >
+                    <span className="font-medium">{hint.ticker}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {hint.weightPct.toFixed(1)}% ({hint.drift >= 0 ? "+" : ""}
+                      {hint.drift.toFixed(1)} vs {hint.target.toFixed(1)}%)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {!stopLossAlerts.length && !rebalanceHints.length ? (
+              <EmptyState>
+                No stop-loss warnings or big overweights. Add a Stop Loss Price
+                column to track exits.
+              </EmptyState>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <Card>
           <CardHeader>
@@ -1222,12 +1590,17 @@ export function OverviewDashboard() {
                     <SortableTableHead id="role" label="Role" sortConfig={topHoldingsSortConfig} onSort={toggleTopHoldingsSort} />
                     <SortableTableHead id="marketValue" label="Value" align="right" sortConfig={topHoldingsSortConfig} onSort={toggleTopHoldingsSort} />
                     <SortableTableHead id="weightPct" label="Weight" align="right" sortConfig={topHoldingsSortConfig} onSort={toggleTopHoldingsSort} />
-                    <SortableTableHead id="unrealizedPnlPct" label="Return" align="right" sortConfig={topHoldingsSortConfig} onSort={toggleTopHoldingsSort} />
+                    <SortableTableHead id="unrealizedPnlPct" label="Since buy" align="right" sortConfig={topHoldingsSortConfig} onSort={toggleTopHoldingsSort} />
+                    <TableHead className="text-right">Day</TableHead>
+                    <TableHead className="text-right">Week</TableHead>
+                    <TableHead className="text-right">Trend</TableHead>
                     <TableHead className="text-right">Info</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedTopHoldings.slice(0, 8).map((holding) => (
+                  {sortedTopHoldings.slice(0, 8).map((holding) => {
+                    const trend = trends.get(normalizeTicker(holding.ticker));
+                    return (
                     <TableRow key={holding.ticker}>
                       <TableCell>
                         <div className="font-semibold">{holding.ticker}</div>
@@ -1245,6 +1618,15 @@ export function OverviewDashboard() {
                       <TableCell className={`text-right tabular-nums ${pnlClass(holding.unrealizedPnlPct)}`}>
                         {formatPct(holding.unrealizedPnlPct)}
                       </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {pctCell(trend?.dayChangePct)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {pctCell(trend?.weekChangePct)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Sparkline data={trend?.spark ?? []} />
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
@@ -1256,7 +1638,8 @@ export function OverviewDashboard() {
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             ) : (
