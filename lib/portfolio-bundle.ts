@@ -1,5 +1,7 @@
 "use client";
 
+import { getLocalUpdatedAt, setLocalUpdatedAt } from "@/lib/storage-events";
+
 // Central list of every localStorage key that holds user portfolio data.
 // Keeping them in one place lets the cloud-sync layer serialize the whole
 // portfolio into a single portable bundle without each feature re-declaring
@@ -42,7 +44,10 @@ export function readLocalBundle(): PortfolioBundle {
     }
   }
 
-  return { version: BUNDLE_VERSION, updatedAt: new Date().toISOString(), data };
+  // Prefer the recorded last-edit time so "newer wins" comparisons across
+  // devices are meaningful; fall back to now for first-ever export.
+  const updatedAt = getLocalUpdatedAt() ?? new Date().toISOString();
+  return { version: BUNDLE_VERSION, updatedAt, data };
 }
 
 // Returns true when the bundle carries no actual portfolio data. Used to
@@ -71,6 +76,9 @@ export function writeLocalBundle(bundle: PortfolioBundle): void {
       window.localStorage.removeItem(key);
     }
   }
+  // Adopt the bundle's modified time so this device matches the source it was
+  // restored from (prevents a needless re-sync loop).
+  setLocalUpdatedAt(bundle.updatedAt);
 }
 
 export function parseBundle(text: string): PortfolioBundle {

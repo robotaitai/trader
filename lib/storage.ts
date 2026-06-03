@@ -21,6 +21,7 @@ import type {
   SecurityMetadata,
   Transaction,
 } from "@/lib/types";
+import { notifyPortfolioChanged } from "@/lib/storage-events";
 
 const TRANSACTIONS_KEY = "investor-os.transactions";
 const METADATA_KEY = "investor-os.security-metadata";
@@ -67,16 +68,19 @@ export function usePortfolioData() {
   const setTransactions = useCallback((nextTransactions: Transaction[]) => {
     setTransactionsState(nextTransactions);
     writeJson(TRANSACTIONS_KEY, nextTransactions);
+    notifyPortfolioChanged();
   }, []);
 
   const setPortfolioSnapshot = useCallback((nextSnapshot: PortfolioSnapshotRow[]) => {
     setPortfolioSnapshotState(nextSnapshot);
     writeJson(SNAPSHOT_KEY, nextSnapshot);
+    notifyPortfolioChanged();
   }, []);
 
   const setPriceHistory = useCallback((nextPriceHistory: PriceHistoryPoint[]) => {
     setPriceHistoryState(nextPriceHistory);
     writeJson(PRICE_HISTORY_KEY, nextPriceHistory);
+    notifyPortfolioChanged();
   }, []);
 
   const loadDemoData = useCallback(() => {
@@ -90,6 +94,7 @@ export function usePortfolioData() {
     writeJson(PRICES_KEY, mockCurrentPrices);
     writeJson(SNAPSHOT_KEY, []);
     writeJson(PRICE_HISTORY_KEY, []);
+    notifyPortfolioChanged();
   }, []);
 
   const clearLocalData = useCallback(() => {
@@ -99,6 +104,7 @@ export function usePortfolioData() {
     writeJson(TRANSACTIONS_KEY, []);
     writeJson(SNAPSHOT_KEY, []);
     writeJson(PRICE_HISTORY_KEY, []);
+    notifyPortfolioChanged();
   }, []);
 
   const holdings = useMemo(
