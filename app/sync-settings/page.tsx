@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { StarPrompt, hasSeenStarPrompt } from "@/components/star-prompt";
 import { getTwelveDataKey, setTwelveDataKey } from "@/lib/market-data";
 import { getPrices } from "@/lib/price-service";
 import { applyLatestCloses } from "@/lib/performance-metrics";
@@ -507,6 +508,7 @@ export default function SyncSettingsPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [notBundledTickers, setNotBundledTickers] = useState<string[]>([]);
   const [twelveKey, setTwelveKey] = useState("");
+  const [showStarPrompt, setShowStarPrompt] = useState(false);
 
   useEffect(() => {
     setTwelveKey(getTwelveDataKey());
@@ -724,6 +726,7 @@ export default function SyncSettingsPage() {
     setPortfolioSnapshot(savedRows);
     setSnapshotPreview(savedRows);
     if (filePriceHistory.length > 0) setPriceHistory(filePriceHistory);
+    if (!hasSeenStarPrompt()) setShowStarPrompt(true);
 
     const count = savedRows.length;
     setSnapshotMessage(
@@ -1316,6 +1319,10 @@ export default function SyncSettingsPage() {
       </Card>
         </div>
       </details>
+      <StarPrompt
+        open={showStarPrompt}
+        onClose={() => setShowStarPrompt(false)}
+      />
     </AppShell>
   );
 }
