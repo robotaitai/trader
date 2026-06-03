@@ -23,6 +23,59 @@ The Pages deployment is handled by `.github/workflows/pages.yml`.
 Real portfolio files should stay out of the repo. Keep private files under
 `private/` or use `*.private.csv`, `*.private.tsv`, or `*.private.xlsx`.
 
+## Storage Modes
+
+The code is public; your data is not. You choose where the data lives in
+`Sync Settings` under `Storage mode`:
+
+- **Per device (default).** Your portfolio stays in this browser's
+  `localStorage`. Nothing leaves the device. This is the original behavior and
+  needs no setup. Note that `localStorage` is per-browser, so data does not
+  follow you to another device on its own.
+- **Google Drive sync (optional).** Your portfolio is saved as a single private
+  file in your own Google Drive, so you can load the same data on your PC,
+  phone, and other devices. The file lives in Drive's hidden `appDataFolder` —
+  an app-only area that does not appear in your normal Drive and that no other
+  app or website can read. The app only ever requests the narrow
+  `drive.appdata` scope.
+
+`localStorage` always stays the live, working copy that every view reads from.
+Drive is the cross-device backing store you push to and pull from:
+
+- **Push to Drive** overwrites the Drive copy with this device's data.
+- **Pull from Drive** overwrites this device with the Drive copy, then reloads.
+- **Auto-pull on load** (optional toggle) silently pulls the latest copy when
+  you open the app on a device that has already been connected.
+
+Typical multi-device flow: edit on your laptop and `Push`, then open the app on
+your phone, `Connect`, and `Pull` (or enable auto-pull). Syncing is
+last-write-wins, so push before switching devices to avoid overwriting newer
+edits.
+
+### One-time Google Drive setup
+
+Because the site is fully static, Google sign-in happens entirely in the
+browser using your own OAuth client. You only do this once.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create (or
+   pick) a project.
+2. Enable the **Google Drive API** for that project.
+3. Configure the **OAuth consent screen** (External). While it is in "Testing",
+   add the Google accounts you will use as **Test users**. The `drive.appdata`
+   scope only touches the app's private folder.
+4. Create an **OAuth client ID** of type **Web application**.
+5. Under **Authorized JavaScript origins**, add the site origin(s) you use, e.g.
+   `https://robotaitai.github.io` for GitHub Pages and `http://localhost:3000`
+   for local development. (Origins are scheme + host only — no path.)
+6. Copy the generated **Client ID** (it looks like
+   `xxxxxxxx.apps.googleusercontent.com`). This value is public, not a secret.
+7. Either paste it into the `Google OAuth Client ID` field in `Sync Settings`,
+   or bake it into the build with the `NEXT_PUBLIC_GOOGLE_CLIENT_ID` environment
+   variable (see below). When the env var is set, the UI field is hidden.
+
+The client ID entered in the UI is stored in this browser's `localStorage`, so
+forks of this repo can each use their own without committing it.
+
 ## How Someone Adds Their Data
 
 1. Open the website and go to `Sync Settings`.
@@ -113,6 +166,15 @@ For local development or serverless hosting such as Vercel/Netlify:
 ```bash
 npm ci
 npm run dev
+```
+
+To enable Google Drive sync without typing the client ID into the UI each time,
+set the public OAuth client ID as an environment variable (e.g. in `.env.local`
+for local dev, or as the `GOOGLE_CLIENT_ID` repository variable consumed by the
+Pages workflow):
+
+```bash
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
 ```
 
 Useful checks:

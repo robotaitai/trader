@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { FileDown, UploadCloud } from "lucide-react";
 import * as XLSX from "xlsx";
 import { AppShell } from "@/components/app-shell";
+import { CloudSyncCard } from "@/components/cloud-sync-card";
 import { PageHeader } from "@/components/page-header";
 import {
   SortableTableHead,
@@ -875,6 +876,8 @@ export default function SyncSettingsPage() {
         title="Local file import"
         description="Upload a transaction ledger, or paste your current portfolio status table. Everything is stored locally in this browser."
       />
+
+      <CloudSyncCard />
 
       <Card className="mb-5">
         <CardHeader>

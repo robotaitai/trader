@@ -43,6 +43,10 @@ jobs:
         env:
           NEXT_OUTPUT: export
           NEXT_PUBLIC_BASE_PATH: /trader
+          # Optional: set repository variable GOOGLE_CLIENT_ID to bake the
+          # Drive-sync OAuth client ID into the build. Safe to leave empty —
+          # the client ID is public and can also be entered in Sync Settings.
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
