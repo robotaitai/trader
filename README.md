@@ -68,16 +68,16 @@ overwriting newer changes.
 ## How Someone Adds Their Data
 
 1. Open the website and go to `Sync Settings`.
-2. Click `Download Investor OS workbook`.
-3. Fill the `Portfolio Snapshot` sheet — one row per holding — in Excel or
-   Google Sheets.
-4. Upload the workbook back into `Sync Settings` and save.
+2. Click `Download CSV template`.
+3. Fill one row per holding in Excel, Google Sheets, Numbers, or any text
+   editor.
+4. Upload the file back into `Sync Settings` and save. CSV, TSV, and Excel
+   (`.xlsx`/`.xls`) files all import.
 5. Review Overview, Holdings, Sectors, Exposure Map, and Performance Lab.
 
-### Workbook format (simple)
+### File format (simple)
 
-The workbook has one sheet you fill, `Portfolio Snapshot`, plus an
-`Instructions` sheet. One row per holding:
+The template is a plain CSV — one row per holding:
 
 | Column | Required | Notes |
 | --- | --- | --- |
@@ -96,9 +96,15 @@ position; filling either one marks the row as **closed**.
 Header names are flexible: `Symbol` works for `Ticker`, `Quantity` for
 `Shares`, `Purchase Price`/`Avg Cost` for `Buy Price`, and so on.
 
+> The CSV is just your holdings for data entry. To back up or move your
+> **entire** app state (holdings, prices, decision journal) between devices,
+> use the JSON Export/Import under `Storage mode` — see
+> [Storage Modes](#storage-modes).
+
 ### Advanced (optional)
 
-Power users can add extra sheets that the importer still understands:
+Power users can upload a multi-sheet Excel workbook with extra sheets the
+importer still understands:
 
 - `Transactions`: a ledger with `date, ticker, action, quantity, price`
   (actions: `BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, FEE, TAX`).

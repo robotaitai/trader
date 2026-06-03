@@ -340,13 +340,22 @@ function buildPriceHistoryRows(rows: RawRow[]) {
   return prices;
 }
 
+function downloadTextFile(content: string, fileName: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+// Simple, human-friendly CSV: one row per holding. Status, value, cost basis,
+// and profit/loss are all computed by the app, so they are not asked for here.
+// Leave the Sell columns blank while you still hold a position; filling either
+// one marks the row as closed.
 function downloadInvestorOsTemplate() {
-  const workbook = XLSX.utils.book_new();
-  // Simple, human-friendly snapshot: one row per holding. Status, value, cost
-  // basis and profit/loss are all computed by the app, so they are not asked
-  // for here. Leave the Sell columns blank while you still hold a position;
-  // filling either of them marks the row as closed.
-  const portfolioSnapshot = XLSX.utils.json_to_sheet(
+  const sheet = XLSX.utils.json_to_sheet(
     [
       {
         Ticker: "NVDA",
@@ -379,30 +388,11 @@ function downloadInvestorOsTemplate() {
       ],
     },
   );
-  const instructions = XLSX.utils.aoa_to_sheet([
-    ["Investor OS — portfolio template"],
-    [""],
-    ["Fill the 'Portfolio Snapshot' sheet: one row per holding."],
-    [""],
-    ["Required columns:  Ticker, Shares, Buy Price"],
-    ["Recommended:       Buy Date (used for performance over time)"],
-    ["Optional:          Current Price (values open positions; the app can also fetch it)"],
-    [""],
-    ["To record a sale, fill 'Sell Price' and/or 'Sell Date'."],
-    ["Leave the Sell columns blank while you still hold the position."],
-    [""],
-    ["The app calculates the rest: current value, cost basis,"],
-    ["profit/loss, and whether each position is active or closed."],
-    [""],
-    ["Dates work best as YYYY-MM-DD (e.g. 2025-01-15)."],
-    ["Your file is parsed locally in your browser and is never uploaded anywhere."],
-    [""],
-    ["Tip: paste a broker statement into ChatGPT and ask it to fill this sheet."],
-  ]);
-
-  XLSX.utils.book_append_sheet(workbook, portfolioSnapshot, "Portfolio Snapshot");
-  XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
-  XLSX.writeFile(workbook, "investor-os-template.xlsx");
+  downloadTextFile(
+    XLSX.utils.sheet_to_csv(sheet),
+    "investor-os-template.csv",
+    "text/csv;charset=utf-8",
+  );
 }
 
 function buildSnapshotRows(rows: RawRow[]) {
@@ -862,9 +852,10 @@ export default function SyncSettingsPage() {
         <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="space-y-2 text-sm leading-6 text-muted-foreground">
             <p>
-              Download the workbook, fill the <strong>Portfolio Snapshot</strong>{" "}
-              sheet — one row per holding — then upload it here. You can also
-              give a broker statement to ChatGPT and ask it to fill the sheet.
+              Download the CSV template, fill one row per holding in Excel,
+              Google Sheets, Numbers, or any text editor, then upload it here.
+              You can also give a broker statement to ChatGPT and ask it to fill
+              it. CSV, TSV, and Excel files all import.
             </p>
             <p>
               Only <strong>Ticker</strong>, <strong>Shares</strong>, and{" "}
@@ -882,7 +873,7 @@ export default function SyncSettingsPage() {
             onClick={downloadInvestorOsTemplate}
           >
             <FileDown className="h-4 w-4" />
-            Download Investor OS workbook
+            Download CSV template
           </Button>
         </CardContent>
       </Card>
