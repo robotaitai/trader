@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, Info, RefreshCw, X } from "lucide-react";
+import { Download, ImageDown, Info, RefreshCw, Share2, X } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -34,6 +34,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getPrices } from "@/lib/price-service";
+import { getAppUrl, shareImage, shareLink } from "@/lib/share";
+import { renderShareImage } from "@/lib/share-image";
 import { mockHistoricalValues } from "@/lib/mock-data";
 import {
   applyLatestCloses,
@@ -780,6 +782,8 @@ export function OverviewDashboard() {
     { date: string; close: number }[]
   >([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
+  const [isSharingImage, setIsSharingImage] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState("");
 
   const trends = useMemo(
@@ -1055,6 +1059,36 @@ export function OverviewDashboard() {
         ? "Flow-adjusted return"
         : "Portfolio candles";
 
+  async function handleShareLink() {
+    const result = await shareLink();
+    if (result === "copied") setShareMsg("Link copied!");
+    else if (result === "shared") setShareMsg("Thanks for sharing!");
+    if (result !== "cancelled") setTimeout(() => setShareMsg(""), 2500);
+  }
+
+  async function handleShareImage() {
+    setIsSharingImage(true);
+    try {
+      const blob = await renderShareImage({
+        returnPct: valueChangePct,
+        benchmarkPct: benchmarkReturnPct,
+        rangeLabel: historyLabel,
+        portfolioValues: visiblePerformancePeriods.map((p) => p.endingValue),
+        benchmarkValues: benchmarkSeries.map((b) => b.close),
+        appUrl: getAppUrl(),
+      });
+      const result = await shareImage(blob, "investor-os-performance.png");
+      if (result === "downloaded") setShareMsg("Image saved — share it anywhere!");
+      else if (result === "shared") setShareMsg("Thanks for sharing!");
+      if (result !== "cancelled") setTimeout(() => setShareMsg(""), 2500);
+    } catch {
+      setShareMsg("Could not build the image.");
+      setTimeout(() => setShareMsg(""), 2500);
+    } finally {
+      setIsSharingImage(false);
+    }
+  }
+
   return (
     <AppShell>
       <PageHeader
@@ -1070,18 +1104,32 @@ export function OverviewDashboard() {
         {closedPositions.length ? (
           <Badge variant="outline">{closedPositions.length} closed positions</Badge>
         ) : null}
-        {holdings.length ? (
+        <div className="ml-auto flex items-center gap-2">
+          {shareMsg ? (
+            <span className="text-xs text-emerald-700">{shareMsg}</span>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto gap-2"
-            onClick={() => void refreshPrices()}
-            disabled={isRefreshing}
+            className="gap-2"
+            onClick={() => void handleShareLink()}
           >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-            {isRefreshing ? "Refreshing..." : "Refresh prices"}
+            <Share2 className="h-4 w-4" />
+            Share
           </Button>
-        ) : null}
+          {holdings.length ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => void refreshPrices()}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              {isRefreshing ? "Refreshing..." : "Refresh prices"}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {holdings.length ? (
@@ -1203,6 +1251,17 @@ export function OverviewDashboard() {
                   </div>
                 </div>
                 <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5"
+                    onClick={() => void handleShareImage()}
+                    disabled={isSharingImage}
+                  >
+                    <ImageDown className="h-3.5 w-3.5" />
+                    {isSharingImage ? "Building..." : "Share image"}
+                  </Button>
                   <div className="flex rounded-md border bg-white p-0.5">
                     {performanceViewOptions.map((option) => (
                       <Button
