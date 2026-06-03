@@ -95,3 +95,19 @@ export function parseBundle(text: string): PortfolioBundle {
     data: parsed.data as Record<string, unknown>,
   };
 }
+
+// Download the current processed portfolio (holdings + fetched prices + journal)
+// as a JSON file the user can re-import later. Used to nudge a backup after
+// importing, since nothing is stored on any server.
+export function downloadProcessedData(fileName = "investor-os-portfolio.json") {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([JSON.stringify(readLocalBundle(), null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
