@@ -1,0 +1,65 @@
+# Tickers bundled into the static price-history dataset.
+# One symbol per line. Lines starting with # are ignored.
+# Re-run: node scripts/build-price-history.mjs   (or the "Refresh price history" Action)
+# Add new symbols here and re-run to bundle them so the app stops hitting the live API.
+
+# Benchmark
+SPY
+
+# Mega-cap / popular stocks
+AAPL
+MSFT
+GOOGL
+AMZN
+NVDA
+META
+TSLA
+BRK-B
+JPM
+V
+MA
+WMT
+XOM
+UNH
+JNJ
+PG
+HD
+COST
+ABBV
+AVGO
+CVX
+KO
+PEP
+MRK
+ADBE
+CRM
+NFLX
+AMD
+INTC
+CSCO
+QCOM
+TXN
+ORCL
+IBM
+DIS
+BA
+CAT
+GE
+NKE
+MCD
+PYPL
+T
+PFE
+BAC
+WFC
+
+# Major ETFs
+QQQ
+VOO
+VTI
+IWM
+DIA
+ARKK
+SCHD
+VEA
+VWO

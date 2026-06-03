@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, FileDown, UploadCloud } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -20,7 +20,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fetchDailyCloses } from "@/lib/market-data";
+import { getTwelveDataKey, setTwelveDataKey } from "@/lib/market-data";
+import { getPrices } from "@/lib/price-service";
 import { applyLatestCloses } from "@/lib/performance-metrics";
 import { downloadProcessedData } from "@/lib/portfolio-bundle";
 import { normalizeTicker } from "@/lib/security-classification";
@@ -504,6 +505,12 @@ export default function SyncSettingsPage() {
   const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [notBundledTickers, setNotBundledTickers] = useState<string[]>([]);
+  const [twelveKey, setTwelveKey] = useState("");
+
+  useEffect(() => {
+    setTwelveKey(getTwelveDataKey());
+  }, []);
 
   const missingRequiredFields = useMemo(
     () => requiredFields.filter((field) => !columnMap[field]),
@@ -573,24 +580,26 @@ export default function SyncSettingsPage() {
     if (tickers.length === 0) return null;
 
     setIsFetchingHistory(true);
-    const to = new Date().toISOString().slice(0, 10);
 
     try {
-      // Fetched in the browser from Yahoo Finance (only ticker symbols are
-      // sent). Works on the static GitHub Pages site with no server.
-      const { prices, failed } = await fetchDailyCloses(tickers, from, to);
+      // Bundled static dataset first; only un-bundled tickers hit the live API.
+      const { prices, notBundled, stillMissing } = await getPrices(
+        tickers,
+        from,
+      );
+      setNotBundledTickers(notBundled);
       if (prices.length === 0) {
         throw new Error("No prices returned.");
       }
       setPriceHistory(prices);
       return {
         prices,
-        errors: failed.map((ticker) => ({ ticker, error: "not found" })),
+        errors: stillMissing.map((ticker) => ({ ticker, error: "not found" })),
       };
     } catch {
       setPriceHistory([]);
       onError(
-        "Saved locally, but live prices could not be fetched right now. You can retry, or add a Current Price column.",
+        "Saved locally, but prices could not be loaded right now. You can retry, or add a Current Price column.",
       );
       return null;
     } finally {
@@ -812,23 +821,23 @@ export default function SyncSettingsPage() {
     }
 
     setIsUpdatingPrices(true);
-    const to = new Date().toISOString().slice(0, 10);
-    const { prices, failed } = await fetchDailyCloses(
+    const { prices, notBundled, stillMissing } = await getPrices(
       activeTickers,
       twoWeeksAgo(),
-      to,
     );
+    setNotBundledTickers(notBundled);
 
     if (prices.length === 0) {
       setIsUpdatingPrices(false);
       setSnapshotErrors([
-        "Could not fetch live prices right now. Please try again in a moment.",
+        "Could not load prices right now. Please try again in a moment.",
       ]);
       return;
     }
 
     const nextSnapshot = applyLatestCloses(portfolioSnapshot, prices);
-    const updatedCount = activeTickers.length - failed.length;
+    const updatedCount = activeTickers.length - stillMissing.length;
+    const failed = stillMissing;
 
     setPortfolioSnapshot(nextSnapshot);
     setSnapshotPreview(nextSnapshot);
@@ -984,6 +993,18 @@ export default function SyncSettingsPage() {
                   Download processed data
                 </Button>
               </div>
+              {notBundledTickers.length > 0 ? (
+                <div className="border-t border-emerald-200 pt-3 text-xs leading-5 text-amber-800">
+                  📌 Not in the bundled price dataset yet:{" "}
+                  <span className="font-medium">
+                    {notBundledTickers.join(", ")}
+                  </span>
+                  . These were fetched live this time. Add them to{" "}
+                  <code>scripts/price-tickers.txt</code> (or run the
+                  &ldquo;Refresh price history&rdquo; Action with them) to bundle
+                  them and stop using the API for these.
+                </div>
+              ) : null}
             </div>
           ) : snapshotMessage ? (
             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
@@ -1034,6 +1055,58 @@ export default function SyncSettingsPage() {
 
       {/* Multi-device sync (optional) */}
       <FileSyncCard />
+
+      {/* Market data (optional) */}
+      <Card className="mb-5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            📈 Market data
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Prices come from a dataset bundled with the app, so most tickers need{" "}
+            <strong>no API calls</strong>. For symbols that aren&apos;t bundled,
+            add an optional free{" "}
+            <a
+              href="https://twelvedata.com/pricing"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              Twelve Data
+            </a>{" "}
+            API key for reliable, proxy-free fallback. Without a key, un-bundled
+            tickers fall back to a best-effort keyless source.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              value={twelveKey}
+              onChange={(event) => setTwelveKey(event.target.value)}
+              placeholder="Twelve Data API key (optional)"
+              className="h-10 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <Button
+              variant="outline"
+              onClick={() => {
+                setTwelveDataKey(twelveKey);
+                setSnapshotMessage(
+                  twelveKey.trim()
+                    ? "Saved your Twelve Data key on this device."
+                    : "Cleared the Twelve Data key.",
+                );
+              }}
+            >
+              Save key
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Stored only in this browser. Only ticker symbols are ever sent to a
+            price provider.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Advanced (optional) */}
       <details className="mb-5 rounded-lg border bg-card text-card-foreground shadow-sm">
