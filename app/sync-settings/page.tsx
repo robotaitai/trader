@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FileDown, UploadCloud } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, FileDown, UploadCloud } from "lucide-react";
 import * as XLSX from "xlsx";
 import { AppShell } from "@/components/app-shell";
 import { FileSyncCard } from "@/components/file-sync-card";
@@ -10,7 +11,7 @@ import {
   SortableTableHead,
   useSortableData,
 } from "@/components/sortable-table";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -223,11 +224,22 @@ function findSheetName(workbook: XLSX.WorkBook, candidates: string[]) {
 }
 
 async function parseWorkbookFromFile(file: File) {
+  const name = file.name.toLowerCase();
+  const looksLikeText =
+    /\.(csv|tsv|txt)$/.test(name) ||
+    file.type === "text/csv" ||
+    file.type === "text/tab-separated-values" ||
+    file.type === "text/plain";
+
+  // Read text files as strings so SheetJS can sniff the delimiter (handles
+  // comma, tab, and the semicolon CSVs that European Excel exports). Binary
+  // formats (.xlsx/.xls) are read as an array buffer.
+  if (looksLikeText) {
+    const text = await file.text();
+    return XLSX.read(text, { type: "string", cellDates: true, raw: false });
+  }
   const arrayBuffer = await file.arrayBuffer();
-  return XLSX.read(arrayBuffer, {
-    type: "array",
-    cellDates: true,
-  });
+  return XLSX.read(arrayBuffer, { type: "array", cellDates: true });
 }
 
 function normalizeSnapshotStatus(value: unknown): PortfolioSnapshotStatus | null {
@@ -527,6 +539,7 @@ export default function SyncSettingsPage() {
   const [snapshotMessage, setSnapshotMessage] = useState("");
   const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const missingRequiredFields = useMemo(
     () => requiredFields.filter((field) => !columnMap[field]),
@@ -691,10 +704,23 @@ export default function SyncSettingsPage() {
     );
   }
 
-  async function handleSnapshotFile(file: File) {
+  // Friendly one-step import used by the guided flow: read the file, then save
+  // it straight to the device (no extra "Save" click, no blocking network
+  // fetch) so the dashboard updates immediately.
+  async function importPortfolioFile(file: File) {
     setSnapshotErrors([]);
     setSnapshotMessage("");
-    const workbook = await parseWorkbookFromFile(file);
+    setIsDragging(false);
+    let workbook: XLSX.WorkBook;
+    try {
+      workbook = await parseWorkbookFromFile(file);
+    } catch {
+      setSnapshotErrors([
+        `Could not read "${file.name}". Please upload a CSV or Excel file (the downloaded template works as-is).`,
+      ]);
+      return;
+    }
+
     const snapshotSheet =
       findSheetName(workbook, ["Portfolio Snapshot", "Snapshot", "Holdings"]) ??
       workbook.SheetNames[0];
@@ -709,17 +735,28 @@ export default function SyncSettingsPage() {
       setSnapshotErrors(result.errors.slice(0, 8));
       return;
     }
+    if (result.snapshotRows.length === 0) {
+      setSnapshotErrors([
+        "No holdings found. Make sure your file has Ticker, Shares, and Buy Price columns with at least one row.",
+      ]);
+      return;
+    }
 
-    setSnapshotPreview(result.snapshotRows);
-    setSnapshotPriceHistoryPreview(
-      priceHistorySheet ? buildPriceHistoryRows(sheetRows(workbook, priceHistorySheet)) : [],
-    );
+    const priceHistory = priceHistorySheet
+      ? buildPriceHistoryRows(sheetRows(workbook, priceHistorySheet))
+      : [];
+    const savedRows =
+      priceHistory.length > 0
+        ? updateSnapshotWithLatestPrices(result.snapshotRows, priceHistory)
+        : result.snapshotRows;
+
+    setPortfolioSnapshot(savedRows);
+    setSnapshotPreview(savedRows);
+    if (priceHistory.length > 0) setPriceHistory(priceHistory);
+
+    const count = savedRows.length;
     setSnapshotMessage(
-      `Parsed ${result.snapshotRows.length} portfolio status rows from ${file.name}${
-        result.skippedRows ? ` and skipped ${result.skippedRows} blank template rows` : ""
-      }${
-        priceHistorySheet ? " Price history sheet detected." : ""
-      }.`,
+      `Imported ${count} holding${count === 1 ? "" : "s"} from "${file.name}" and saved them on this device.`,
     );
   }
 
@@ -838,94 +875,219 @@ export default function SyncSettingsPage() {
   return (
     <AppShell>
       <PageHeader
-        eyebrow="Sync Settings"
-        title="Local file import"
-        description="Upload a transaction ledger, or paste your current portfolio status table. Everything is stored locally in this browser."
+        eyebrow="Portfolio"
+        title="Add your portfolio"
+        description="Import your holdings from a simple file. Everything stays on your device — nothing is uploaded."
       />
 
-      <FileSyncCard />
-
+      {/* Guided, friendly import flow */}
       <Card className="mb-5">
         <CardHeader>
-          <CardTitle>How to Add Private Data</CardTitle>
+          <CardTitle>📈 Add your portfolio in 3 steps</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div className="space-y-2 text-sm leading-6 text-muted-foreground">
-            <p>
-              Download the CSV template, fill one row per holding in Excel,
-              Google Sheets, Numbers, or any text editor, then upload it here.
-              You can also give a broker statement to ChatGPT and ask it to fill
-              it. CSV, TSV, and Excel files all import.
-            </p>
-            <p>
-              Only <strong>Ticker</strong>, <strong>Shares</strong>, and{" "}
-              <strong>Buy Price</strong> are required. Fill <strong>Sell
-              Price</strong>/<strong>Sell Date</strong> when you sell. The app
-              calculates value, profit/loss, and active vs closed for you. The
-              file is parsed locally in your browser and is not uploaded
-              anywhere.
-            </p>
+        <CardContent className="space-y-6">
+          {/* Step 1 — download */}
+          <div className="flex gap-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              1
+            </div>
+            <div className="space-y-2">
+              <div className="font-medium">📥 Download the template</div>
+              <p className="text-sm text-muted-foreground">
+                A simple CSV — one row per holding. Opens in Excel, Google
+                Sheets, Numbers, or any text editor.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={downloadInvestorOsTemplate}
+              >
+                <FileDown className="h-4 w-4" />
+                Download CSV template
+              </Button>
+            </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="justify-start gap-2"
-            onClick={downloadInvestorOsTemplate}
-          >
-            <FileDown className="h-4 w-4" />
-            Download CSV template
-          </Button>
+
+          {/* Step 2 — fill */}
+          <div className="flex gap-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              2
+            </div>
+            <div className="space-y-1">
+              <div className="font-medium">✍️ Fill in your holdings</div>
+              <p className="text-sm text-muted-foreground">
+                Required: <strong>Ticker</strong>, <strong>Shares</strong>,{" "}
+                <strong>Buy Price</strong>. Add <strong>Sell Price</strong> /{" "}
+                <strong>Sell Date</strong> when you sell — value, profit/loss,
+                and active vs closed are calculated for you.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                💡 Tip: paste a broker statement into ChatGPT and ask it to fill
+                the template.
+              </p>
+            </div>
+          </div>
+
+          {/* Step 3 — upload */}
+          <div className="flex gap-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              3
+            </div>
+            <div className="flex-1 space-y-2">
+              <div className="font-medium">📤 Upload it back here</div>
+              <label
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const file = event.dataTransfer.files?.[0];
+                  if (file) void importPortfolioFile(file);
+                }}
+                className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition-colors ${
+                  isDragging
+                    ? "border-primary bg-primary/5"
+                    : "border-gray-300 bg-white hover:bg-gray-50"
+                }`}
+              >
+                <UploadCloud className="mb-3 h-9 w-9 text-gray-500" />
+                <div className="font-medium">
+                  Drag your file here, or tap to choose
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  CSV, TSV, or Excel — saved on this device only, never
+                  uploaded.
+                </div>
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/plain"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importPortfolioFile(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Feedback */}
+          {snapshotErrors.length > 0 ? (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="font-medium">⚠️ We couldn’t import that file</div>
+              {snapshotErrors.map((error) => (
+                <div key={error}>{error}</div>
+              ))}
+            </div>
+          ) : null}
+
+          {portfolioSnapshot.length > 0 ? (
+            <div className="flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                ✅ {portfolioSnapshot.length} holding
+                {portfolioSnapshot.length === 1 ? "" : "s"} saved on this device.
+              </div>
+              <Link
+                href="/overview"
+                className={buttonVariants({ className: "gap-2" })}
+              >
+                View your dashboard
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          ) : snapshotMessage ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              {snapshotMessage}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
-      <div className="mb-5 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <Card>
+      {/* Imported holdings preview */}
+      {snapshotPreview.length > 0 ? (
+        <Card className="mb-5">
           <CardHeader>
-            <CardTitle>Current Portfolio Snapshot</CardTitle>
+            <CardTitle>Imported holdings</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-md border bg-gray-50 p-4 text-sm">
-              <div className="font-medium">Saved local status</div>
-              <div className="mt-1 text-muted-foreground">
-                {portfolioSnapshot.length} rows saved. Active rows override the
-                transaction ledger for dashboard calculations.
-              </div>
-            </div>
+          <CardContent>
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow>
+                  <SortableTableHead id="ticker" label="Ticker" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="status" label="Status" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="shares" label="Shares" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="purchasePrice" label="Buy" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="currentPrice" label="Current" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="valueUsd" label="Value" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                  <SortableTableHead id="activeEarning" label="P&L" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedSnapshotPreview.slice(0, 8).map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-semibold">{row.ticker}</TableCell>
+                    <TableCell>{row.status}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.shares}</TableCell>
+                    <TableCell className="text-right tabular-nums">${row.purchasePrice.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">${row.currentPrice.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">${Math.round(row.valueUsd).toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.activeEarning === undefined ? "-" : `$${Math.round(row.activeEarning).toLocaleString()}`}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
 
-            <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center hover:bg-gray-50">
-              <UploadCloud className="mb-3 h-7 w-7 text-gray-500" />
-              <div className="font-medium">Upload current status CSV/XLSX/TSV</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                Supports columns like Ticker, Shares, Purchase Price, Current
-                Price, Cost Basis, Status, Final Earning, Active Earning.
-              </div>
-              <input
-                type="file"
-                accept=".csv,.tsv,.xlsx,.xls"
-                className="sr-only"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleSnapshotFile(file);
-                }}
-              />
-            </label>
+      {/* Multi-device sync (optional) */}
+      <FileSyncCard />
 
+      {/* Advanced (optional) */}
+      <details className="mb-5 rounded-lg border bg-card text-card-foreground shadow-sm">
+        <summary className="cursor-pointer px-6 py-4 font-medium [&::-webkit-details-marker]:hidden">
+          ⚙️ Advanced — paste a table, update prices, or import a transactions ledger
+        </summary>
+        <div className="space-y-6 border-t px-6 py-5">
+          {/* Paste / manage holdings */}
+          <div className="space-y-3">
+            <div className="text-sm font-medium">Paste a holdings table</div>
+            <p className="text-xs text-muted-foreground">
+              Copy rows from a spreadsheet (tab- or comma-separated) and paste
+              them here, then parse and save.
+            </p>
             <textarea
               value={snapshotText}
               onChange={(event) => setSnapshotText(event.target.value)}
-              placeholder="Paste your tab-separated portfolio status table here..."
-              className="min-h-44 w-full rounded-md border bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="Ticker  Shares  Buy Price  Buy Date  Current Price"
+              className="min-h-36 w-full rounded-md border bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 onClick={() => parseManualSnapshot(snapshotText)}
               >
-                Parse pasted status
+                Parse pasted table
               </Button>
               <Button onClick={saveSnapshot} disabled={snapshotPreview.length === 0}>
-                {isFetchingHistory ? "Saving + fetching..." : "Save status locally"}
+                {isFetchingHistory ? "Saving..." : "Save pasted table"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void updateSavedSnapshotPrices()}
+                disabled={
+                  portfolioSnapshot.length === 0 ||
+                  isUpdatingPrices ||
+                  isFetchingHistory
+                }
+              >
+                {isUpdatingPrices ? "Updating prices..." : "Update current prices"}
               </Button>
               <Button
                 variant="outline"
@@ -933,88 +1095,13 @@ export default function SyncSettingsPage() {
                   setPortfolioSnapshot([]);
                   setSnapshotPreview([]);
                   setPriceHistory([]);
-                  setSnapshotMessage("Cleared the saved status snapshot.");
+                  setSnapshotMessage("Cleared all saved holdings.");
                 }}
               >
-                Clear saved status
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void updateSavedSnapshotPrices()}
-                disabled={portfolioSnapshot.length === 0 || isUpdatingPrices || isFetchingHistory}
-              >
-                {isUpdatingPrices ? "Updating prices..." : "Update current prices"}
+                Clear all holdings
               </Button>
             </div>
-
-            {snapshotErrors.length > 0 ? (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {snapshotErrors.map((error) => (
-                  <div key={error}>{error}</div>
-                ))}
-              </div>
-            ) : null}
-            {snapshotMessage ? (
-              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                {snapshotMessage}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Status Preview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {snapshotPreview.length ? (
-              <Table className="text-xs">
-                <TableHeader>
-                  <TableRow>
-                    <SortableTableHead id="ticker" label="Ticker" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="status" label="Status" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="shares" label="Shares" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="purchasePrice" label="Purchase" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="currentPrice" label="Current" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="valueUsd" label="Value USD" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                    <SortableTableHead id="activeEarning" label="Active P&L" align="right" sortConfig={snapshotPreviewSortConfig} onSort={toggleSnapshotPreviewSort} />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedSnapshotPreview.slice(0, 8).map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell className="font-semibold">{row.ticker}</TableCell>
-                      <TableCell>{row.status}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.shares}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        ${row.purchasePrice.toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        ${row.currentPrice.toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        ${Math.round(row.valueUsd).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.activeEarning === undefined
-                          ? "-"
-                          : `$${Math.round(row.activeEarning).toLocaleString()}`}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <div className="rounded-md border bg-gray-50 p-6 text-sm text-muted-foreground">
-                Upload or paste a current-status table to preview active and
-                closed rows before saving.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <Card>
@@ -1168,6 +1255,8 @@ export default function SyncSettingsPage() {
           )}
         </CardContent>
       </Card>
+        </div>
+      </details>
     </AppShell>
   );
 }
