@@ -1,0 +1,49 @@
+name: Refresh price history
+
+# Rebuilds the bundled price dataset (public/data/prices) from Stooq and commits
+# it. Runs weekly and on demand. Pushing to main triggers the Pages deploy, so
+# the live site picks up fresh prices automatically.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Extra tickers to add (space-separated, e.g. SMCI PLTR)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-prices
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build price history
+        run: node scripts/build-price-history.mjs ${{ github.event.inputs.tickers }}
+
+      - name: Commit updated dataset
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data/prices
+          if git diff --cached --quiet; then
+            echo "No price changes to commit."
+          else
+            git commit -m "Refresh bundled price history"
+            git push
+          fi

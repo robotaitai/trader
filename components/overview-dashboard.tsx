@@ -33,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fetchDailyCloses } from "@/lib/market-data";
+import { getPrices } from "@/lib/price-service";
 import { mockHistoricalValues } from "@/lib/mock-data";
 import {
   applyLatestCloses,
@@ -826,8 +826,8 @@ export function OverviewDashboard() {
     const tickers = holdings.map((holding) => holding.ticker).filter(Boolean);
     if (tickers.length === 0) return;
     setIsRefreshing(true);
-    setRefreshMessage("Fetching live prices...");
-    const { prices, failed } = await fetchDailyCloses(
+    setRefreshMessage("Loading prices...");
+    const { prices, notBundled, stillMissing } = await getPrices(
       [...tickers, "SPY"],
       earliestDate,
     );
@@ -841,13 +841,16 @@ export function OverviewDashboard() {
     }
     setBenchmarkSeries(spy.map((point) => ({ date: point.date, close: point.close })));
     setIsRefreshing(false);
-    const missing = failed.filter((ticker) => ticker !== "SPY");
+    const unbundled = notBundled.filter((ticker) => ticker !== "SPY");
+    const missing = stillMissing.filter((ticker) => ticker !== "SPY");
     setRefreshMessage(
       holdingPrices.length === 0
-        ? "Could not fetch live prices right now. Try again in a moment."
+        ? "Could not load prices right now. Try again in a moment."
         : missing.length
-          ? `Prices updated. Couldn't find: ${missing.join(", ")}.`
-          : `Prices updated ${new Date().toLocaleTimeString()}.`,
+          ? `Updated. Couldn't find: ${missing.join(", ")}.`
+          : unbundled.length
+            ? `Updated ${new Date().toLocaleTimeString()} (fetched live, not bundled: ${unbundled.join(", ")}).`
+            : `Updated ${new Date().toLocaleTimeString()} from bundled data.`,
     );
   }
 

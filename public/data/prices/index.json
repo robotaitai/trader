@@ -1,0 +1,1 @@
+{ "generatedAt": null, "years": 5, "covered": [], "failed": [], "note": "Run scripts/build-price-history.mjs or the 'Refresh price history' Action to populate per-ticker files." }

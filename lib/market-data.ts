@@ -141,3 +141,92 @@ export async function fetchDailyCloses(
 
   return { prices, failed };
 }
+
+// ---------------------------------------------------------------------------
+// Twelve Data (optional, user-supplied free API key). CORS-enabled, so it is
+// fetched directly with no proxy — more reliable than the keyless path. Used
+// only for tickers that are not in the bundled dataset.
+// ---------------------------------------------------------------------------
+const TWELVE_DATA_KEY = "investor-os.twelvedata.key";
+
+export function getTwelveDataKey(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(TWELVE_DATA_KEY) ?? "";
+}
+
+export function setTwelveDataKey(value: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TWELVE_DATA_KEY, value.trim());
+}
+
+interface TwelveDataSeries {
+  status?: string;
+  values?: Array<{ datetime: string; close: string }>;
+}
+
+function parseTwelveSeries(
+  ticker: string,
+  series: TwelveDataSeries | undefined,
+): PriceHistoryPoint[] {
+  if (!series?.values) return [];
+  const normalized = normalizeTicker(ticker);
+  return series.values
+    .map((value) => ({
+      ticker: normalized,
+      date: value.datetime.slice(0, 10),
+      close: Number(value.close),
+    }))
+    .filter((point) => Number.isFinite(point.close));
+}
+
+export async function fetchTwelveData(
+  tickers: string[],
+  from: string,
+  apiKey: string,
+): Promise<DailyClosesResult> {
+  const unique = Array.from(
+    new Set(tickers.map(normalizeTicker).filter(Boolean)),
+  );
+  if (unique.length === 0 || !apiKey) return { prices: [], failed: unique };
+
+  const prices: PriceHistoryPoint[] = [];
+  const failed: string[] = [];
+
+  // Free tier allows ~8 symbols/minute; request in small batches.
+  for (let i = 0; i < unique.length; i += 8) {
+    const batch = unique.slice(i, i + 8);
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const url = new URL("https://api.twelvedata.com/time_series");
+    url.searchParams.set("symbol", batch.join(","));
+    url.searchParams.set("interval", "1day");
+    url.searchParams.set("start_date", from);
+    url.searchParams.set("outputsize", "5000");
+    url.searchParams.set("apikey", apiKey);
+    url.searchParams.set("format", "JSON");
+
+    try {
+      const response = await fetch(url.toString());
+      const data = (await response.json()) as
+        | TwelveDataSeries
+        | Record<string, TwelveDataSeries>;
+
+      if (batch.length === 1) {
+        const points = parseTwelveSeries(batch[0], data as TwelveDataSeries);
+        if (points.length) prices.push(...points);
+        else failed.push(batch[0]);
+      } else {
+        const map = data as Record<string, TwelveDataSeries>;
+        for (const ticker of batch) {
+          const points = parseTwelveSeries(ticker, map[ticker]);
+          if (points.length) prices.push(...points);
+          else failed.push(ticker);
+        }
+      }
+    } catch {
+      failed.push(...batch);
+    }
+  }
+
+  return { prices, failed };
+}
