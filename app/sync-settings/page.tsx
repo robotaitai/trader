@@ -21,6 +21,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StarPrompt, hasSeenStarPrompt } from "@/components/star-prompt";
+import {
+  DEFAULT_MODELS,
+  PROVIDER_KEY_HINTS,
+  PROVIDER_LABELS,
+  getAiConfig,
+  setAiConfig,
+  type AiProvider,
+} from "@/lib/ai-insights";
 import { getTwelveDataKey, setTwelveDataKey } from "@/lib/market-data";
 import { getPrices } from "@/lib/price-service";
 import { applyLatestCloses } from "@/lib/performance-metrics";
@@ -509,10 +517,27 @@ export default function SyncSettingsPage() {
   const [notBundledTickers, setNotBundledTickers] = useState<string[]>([]);
   const [twelveKey, setTwelveKey] = useState("");
   const [showStarPrompt, setShowStarPrompt] = useState(false);
+  const [aiProvider, setAiProvider] = useState<AiProvider>("openai");
+  const [aiKey, setAiKey] = useState("");
+  const [aiModel, setAiModel] = useState(DEFAULT_MODELS.openai);
+  const [aiIncludeDollars, setAiIncludeDollars] = useState(false);
 
   useEffect(() => {
     setTwelveKey(getTwelveDataKey());
+    const ai = getAiConfig();
+    setAiProvider(ai.provider);
+    setAiKey(ai.apiKey);
+    setAiModel(ai.model);
+    setAiIncludeDollars(ai.includeDollars);
   }, []);
+
+  function selectAiProvider(provider: AiProvider) {
+    setAiProvider(provider);
+    // Swap to the provider's default model unless the user customized it.
+    if (Object.values(DEFAULT_MODELS).includes(aiModel)) {
+      setAiModel(DEFAULT_MODELS[provider]);
+    }
+  }
 
   const missingRequiredFields = useMemo(
     () => requiredFields.filter((field) => !columnMap[field]),
@@ -1108,6 +1133,96 @@ export default function SyncSettingsPage() {
             Stored only in this browser. Only ticker symbols are ever sent to a
             price provider.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* AI insights (optional) */}
+      <Card className="mb-5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">✨ AI insights</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Add your own AI provider key to generate insights on your portfolio
+            from the dashboard. Calls go straight from your browser to the
+            provider — your key never touches our servers.
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(PROVIDER_LABELS) as AiProvider[]).map((provider) => (
+              <Button
+                key={provider}
+                type="button"
+                size="sm"
+                variant={aiProvider === provider ? "default" : "outline"}
+                onClick={() => selectAiProvider(provider)}
+              >
+                {PROVIDER_LABELS[provider]}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              value={aiKey}
+              onChange={(event) => setAiKey(event.target.value)}
+              placeholder={`${PROVIDER_LABELS[aiProvider]} API key`}
+              className="h-10 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <input
+              type="text"
+              value={aiModel}
+              onChange={(event) => setAiModel(event.target.value)}
+              placeholder="Model"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-56"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Get a key at {PROVIDER_KEY_HINTS[aiProvider]}. Default model:{" "}
+            <code>{DEFAULT_MODELS[aiProvider]}</code> — edit if you prefer
+            another.
+          </p>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={aiIncludeDollars}
+              onChange={(event) => setAiIncludeDollars(event.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              Include dollar amounts in what&apos;s sent to the AI.{" "}
+              <span className="text-muted-foreground">
+                Off by default — only weights and returns (percentages) are sent,
+                so your net worth stays private.
+              </span>
+            </span>
+          </label>
+
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAiConfig({
+                  provider: aiProvider,
+                  apiKey: aiKey,
+                  model: aiModel.trim() || DEFAULT_MODELS[aiProvider],
+                  includeDollars: aiIncludeDollars,
+                });
+                setSnapshotMessage(
+                  aiKey.trim()
+                    ? `Saved your ${PROVIDER_LABELS[aiProvider]} key on this device.`
+                    : "Cleared the AI key.",
+                );
+              }}
+            >
+              Save AI settings
+            </Button>
+            <span className="text-xs text-amber-700">
+              Enabling AI sends a portfolio summary to {PROVIDER_LABELS[aiProvider]}.
+            </span>
+          </div>
         </CardContent>
       </Card>
 

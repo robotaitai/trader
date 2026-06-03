@@ -33,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AiInsightsCard } from "@/components/ai-insights-card";
 import { getPrices } from "@/lib/price-service";
 import { getAppUrl, shareImage, shareLink } from "@/lib/share";
 import { renderShareImage } from "@/lib/share-image";
@@ -1440,6 +1441,26 @@ export function OverviewDashboard() {
             )}
           </CardContent>
         </Card>
+
+        <AiInsightsCard
+          data={{
+            totalValue: summary.portfolioValue,
+            totalReturnPct: summary.unrealizedPnlPct,
+            benchmarkReturnPct,
+            hhi: summary.hhi,
+            holdings: holdings.map((h) => ({
+              ticker: h.ticker,
+              sector: h.sector,
+              weightPct: h.weightPct,
+              returnPct: h.unrealizedPnlPct,
+              value: h.marketValue,
+            })),
+            sectors: sectorExposure.map((s) => ({
+              sector: s.sector,
+              weightPct: s.weightPct,
+            })),
+          }}
+        />
 
         <Card>
           <CardHeader>
