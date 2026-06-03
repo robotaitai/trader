@@ -88,7 +88,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="border-t px-6 py-5 text-xs leading-5 text-muted-foreground">
-            Local-first Phase 1. Data stays in this browser via localStorage.
+            Local-first Phase 1. Data stays on your device (localStorage); sync
+            across devices with a portable file.
           </div>
         </div>
       </aside>

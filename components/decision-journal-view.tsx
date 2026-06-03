@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { usePortfolioData } from "@/lib/storage";
+import { notifyPortfolioChanged } from "@/lib/storage-events";
 import type { DecisionJournalEntry } from "@/lib/types";
 import { formatCurrency, formatPct, pnlClass } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ function readJournal() {
 
 function writeJournal(entries: DecisionJournalEntry[]) {
   window.localStorage.setItem(JOURNAL_KEY, JSON.stringify(entries));
+  notifyPortfolioChanged();
 }
 
 function today() {

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { FileDown, UploadCloud } from "lucide-react";
 import * as XLSX from "xlsx";
 import { AppShell } from "@/components/app-shell";
+import { FileSyncCard } from "@/components/file-sync-card";
 import { PageHeader } from "@/components/page-header";
 import {
   SortableTableHead,
@@ -339,93 +340,59 @@ function buildPriceHistoryRows(rows: RawRow[]) {
   return prices;
 }
 
-function downloadInvestorOsTemplate() {
-  const workbook = XLSX.utils.book_new();
-  const portfolioSnapshot = XLSX.utils.json_to_sheet([
-    {
-      Ticker: "NVDA",
-      "Security Type": "Stock",
-      Shares: 10,
-      "Purchase Date": "2025-01-15",
-      "Purchase Price": 100,
-      "Current Price": 125,
-      "Value USD": 1250,
-      "Cost Basis": 1000,
-      "Ernings Prct": 25,
-      "Sold Date": "",
-      "Sold Price": "",
-      "Stop Loss Price": "",
-      Status: "Active",
-      "Final Earning": "",
-      "Active Earning": 250,
-    },
-    {
-      Ticker: "VOO",
-      "Security Type": "ETF",
-      Shares: 5,
-      "Purchase Date": "2024-06-03",
-      "Purchase Price": 450,
-      "Current Price": 500,
-      "Value USD": 2500,
-      "Cost Basis": 2250,
-      "Ernings Prct": 11.11,
-      "Sold Date": "",
-      "Sold Price": "",
-      "Stop Loss Price": "",
-      Status: "Active",
-      "Final Earning": "",
-      "Active Earning": 250,
-    },
-  ]);
-  const transactions = XLSX.utils.json_to_sheet([
-    {
-      date: "2025-01-15",
-      ticker: "NVDA",
-      action: "BUY",
-      quantity: 10,
-      price: 100,
-      currency: "USD",
-      fees: 0,
-      notes: "Optional",
-    },
-  ]);
-  const priceHistory = XLSX.utils.json_to_sheet([
-    { date: "2025-01-15", ticker: "NVDA", close: 100 },
-    { date: "2025-01-16", ticker: "NVDA", close: 102 },
-    { date: "2025-01-15", ticker: "VOO", close: 450 },
-    { date: "2025-01-16", ticker: "VOO", close: 452 },
-  ]);
-  const metadata = XLSX.utils.json_to_sheet([
-    {
-      ticker: "NVDA",
-      name: "NVIDIA Corp.",
-      sector: "Semiconductors",
-      currency: "USD",
-      exchange: "NASDAQ",
-    },
-  ]);
-  const instructions = XLSX.utils.aoa_to_sheet([
-    ["Investor OS data template"],
-    [""],
-    ["Use Portfolio Snapshot for your current holdings/status."],
-    ["Use Transactions if you prefer a ledger import."],
-    ["Use Price History for GitHub Pages/static mode, where the app cannot call a server API."],
-    ["You can ask ChatGPT to convert broker PDFs/statements into these sheets."],
-    ["Your uploaded workbook is parsed locally in your browser; this app does not upload it anywhere."],
-    [""],
-    ["Required Portfolio Snapshot columns: Ticker, Shares, Purchase Price."],
-    ["Recommended Portfolio Snapshot columns: Security Type, Purchase Date, Current Price, Value USD, Cost Basis, Status, Sold Date, Sold Price, Final Earning, Active Earning."],
-    ["Required Transactions columns: date, ticker, action, quantity, price."],
-    ["Valid transaction actions: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, FEE, TAX."],
-    ["Required Price History columns: date, ticker, close."],
-  ]);
+function downloadTextFile(content: string, fileName: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
-  XLSX.utils.book_append_sheet(workbook, portfolioSnapshot, "Portfolio Snapshot");
-  XLSX.utils.book_append_sheet(workbook, transactions, "Transactions");
-  XLSX.utils.book_append_sheet(workbook, priceHistory, "Price History");
-  XLSX.utils.book_append_sheet(workbook, metadata, "Security Metadata");
-  XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
-  XLSX.writeFile(workbook, "investor-os-template.xlsx");
+// Simple, human-friendly CSV: one row per holding. Status, value, cost basis,
+// and profit/loss are all computed by the app, so they are not asked for here.
+// Leave the Sell columns blank while you still hold a position; filling either
+// one marks the row as closed.
+function downloadInvestorOsTemplate() {
+  const sheet = XLSX.utils.json_to_sheet(
+    [
+      {
+        Ticker: "NVDA",
+        Shares: 10,
+        "Buy Price": 100,
+        "Buy Date": "2025-01-15",
+        "Current Price": 125,
+        "Sell Price": "",
+        "Sell Date": "",
+      },
+      {
+        Ticker: "AAPL",
+        Shares: 5,
+        "Buy Price": 150,
+        "Buy Date": "2024-03-10",
+        "Current Price": "",
+        "Sell Price": 190,
+        "Sell Date": "2025-02-01",
+      },
+    ],
+    {
+      header: [
+        "Ticker",
+        "Shares",
+        "Buy Price",
+        "Buy Date",
+        "Current Price",
+        "Sell Price",
+        "Sell Date",
+      ],
+    },
+  );
+  downloadTextFile(
+    XLSX.utils.sheet_to_csv(sheet),
+    "investor-os-template.csv",
+    "text/csv;charset=utf-8",
+  );
 }
 
 function buildSnapshotRows(rows: RawRow[]) {
@@ -876,6 +843,8 @@ export default function SyncSettingsPage() {
         description="Upload a transaction ledger, or paste your current portfolio status table. Everything is stored locally in this browser."
       />
 
+      <FileSyncCard />
+
       <Card className="mb-5">
         <CardHeader>
           <CardTitle>How to Add Private Data</CardTitle>
@@ -883,16 +852,18 @@ export default function SyncSettingsPage() {
         <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="space-y-2 text-sm leading-6 text-muted-foreground">
             <p>
-              Download the Investor OS workbook, fill it in Excel or Google
-              Sheets, then upload it here. You can also give broker PDFs or
-              statements to ChatGPT and ask it to convert them into this
-              workbook format.
+              Download the CSV template, fill one row per holding in Excel,
+              Google Sheets, Numbers, or any text editor, then upload it here.
+              You can also give a broker statement to ChatGPT and ask it to fill
+              it. CSV, TSV, and Excel files all import.
             </p>
             <p>
-              For GitHub Pages/static hosting, include the optional Price
-              History sheet so Daily and Weekly performance can work without a
-              server API. The file is parsed locally in your browser and is not
-              uploaded to Investor OS.
+              Only <strong>Ticker</strong>, <strong>Shares</strong>, and{" "}
+              <strong>Buy Price</strong> are required. Fill <strong>Sell
+              Price</strong>/<strong>Sell Date</strong> when you sell. The app
+              calculates value, profit/loss, and active vs closed for you. The
+              file is parsed locally in your browser and is not uploaded
+              anywhere.
             </p>
           </div>
           <Button
@@ -902,7 +873,7 @@ export default function SyncSettingsPage() {
             onClick={downloadInvestorOsTemplate}
           >
             <FileDown className="h-4 w-4" />
-            Download Investor OS workbook
+            Download CSV template
           </Button>
         </CardContent>
       </Card>
